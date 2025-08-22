@@ -1,4 +1,3 @@
-# app/background.py
 import os
 import torch
 from app.services.asr_service import transcribe_with_diarization

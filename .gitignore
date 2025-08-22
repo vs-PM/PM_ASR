@@ -1,0 +1,76 @@
+# --------------------------------------------------
+# 1️⃣  Python & virtual‑env
+# --------------------------------------------------
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+sdist/
+*.egg-info/
+*.whl
+*.log
+venv/
+
+# 2️⃣  IDE / Editor artefacts
+# --------------------------------------------------
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# 3️⃣  Docker artefacts
+# --------------------------------------------------
+docker-compose.override.yml
+docker-compose.prod.yml
+docker-compose.yml
+*.dockerfile
+*.dockerignore
+*.docker
+*.sh
+*.pyc
+
+# 4️⃣  OS‑specific
+# --------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 5️⃣  Local environment files
+# --------------------------------------------------
+.env
+.env.*
+*.env
+
+# 6️⃣  Node/npm (если есть в n8n‑проектах)
+# --------------------------------------------------
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# 7️⃣  Miscellaneous
+# --------------------------------------------------
+*.cache
+*.tmp
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite
+*.db3
+
+# --------------------------------------------------
+# 7️⃣  Git‑specific (to keep clean history)
+# --------------------------------------------------
+# Ignore everything by default, then re‑include needed files
+!requirements.txt
+!Dockerfile
+!app.py
+!*.py
+!*.txt
