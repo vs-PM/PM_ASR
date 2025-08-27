@@ -64,6 +64,7 @@ yarn-error.log
 *.db
 *.sqlite
 *.db3
+*.m4a
 
 # --------------------------------------------------
 # 7️⃣  Git‑specific (to keep clean history)
