@@ -17,6 +17,7 @@ sdist/
 *.whl
 *.log
 venv/
+.venv/
 
 # 2️⃣  IDE / Editor artefacts
 # --------------------------------------------------

@@ -4,6 +4,7 @@ import logging
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool, types as sqltypes
+from alembic.autogenerate import renderers
 
 # --- путь до проекта ---
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -16,8 +17,6 @@ from app.logger import get_logger
 
 # Поддержка pgvector
 from pgvector.sqlalchemy import Vector
-from alembic.autogenerate import renderers
-
 
 # --- Alembic config ---
 config = context.config
@@ -25,29 +24,26 @@ config.set_main_option("sqlalchemy.url", settings.get_dsn())
 
 # --- Логирование ---
 root_logger = get_logger("alembic")
-root_logger.setLevel(logging.DEBUG if not settings.ollam_prod else logging.WARNING)
+root_logger.setLevel(logging.DEBUG if not getattr(settings, "ollam_prod", False) else logging.WARNING)
 
 # --- Метаданные моделей ---
 target_metadata = Base.metadata
-
 
 # ---- кастомный рендер для Vector ----
 @renderers.dispatch_for(sqltypes.UserDefinedType)
 def render_user_defined_types(type_, autogen_context):
     """
-    Универсальный хук для всех UserDefinedType.
-    Проверяем, если это именно Vector/VECTOR — рендерим красиво.
+    Универсальный хук для UserDefinedType (например, Vector).
+    Добавляет импорт автоматически и рендерит тип.
     """
-    if isinstance(type_, Vector) or type(type_) is Vector or type(type_).__name__ == "VECTOR":
+    if isinstance(type_, Vector) or type(type_).__name__ == "VECTOR":
         autogen_context.imports.add("from pgvector.sqlalchemy import Vector")
         return f"Vector({getattr(type_, 'dim', None) or 0})"
-    # другие UserDefinedType не трогаем → пусть Alembic обрабатывает как обычно
     return None
-# ------------------------------------
 
 
 def run_migrations_offline() -> None:
-    """Запуск миграций в 'offline' режиме (без подключения к БД)."""
+    """Миграции в offline режиме (без подключения к БД)."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -62,12 +58,13 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Запуск миграций в 'online' режиме (с подключением к БД)."""
+    """Миграции в online режиме (с подключением к БД)."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section) or {},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+
     with connectable.connect() as connection:
         context.configure(
             connection=connection,

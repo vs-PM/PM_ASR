@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     def get_dsn(self) -> str:
         return (
-            f"postgresql://{self.ollama_db_user}:"
+            f"postgresql+asyncpg://{self.ollama_db_user}:"
             f"{self.ollama_db_password}@{self.ollama_db_host}:"
             f"{self.ollama_db_port}/{self.ollama_db_name}"
         )
