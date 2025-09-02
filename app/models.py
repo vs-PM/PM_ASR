@@ -1,5 +1,7 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, BigInteger, String, Text, ForeignKey, Float, func
+from sqlalchemy import (
+    Column, BigInteger, String, Text, ForeignKey, Float, Date, Integer, func
+)
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP as PG_TIMESTAMP
 from pgvector.sqlalchemy import Vector
 
@@ -24,8 +26,8 @@ class MfgSegment(Base):
     id            = Column(BigInteger, primary_key=True, autoincrement=True)
     transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False)
     speaker       = Column(String)
-    start_ts      = Column(Float)   # изменено на Float
-    end_ts        = Column(Float)   # изменено на Float
+    start_ts      = Column(Float)   
+    end_ts        = Column(Float)   
     text          = Column(Text)
 
 class MfgDiarization(Base):
@@ -42,3 +44,22 @@ class MfgEmbedding(Base):
     id         = Column(BigInteger, primary_key=True, autoincrement=True)
     segment_id = Column(BigInteger, ForeignKey("mfg_segment.id", ondelete="CASCADE"), nullable=False)
     embedding  = Column(Vector(768))  # Nomic Embed Text
+
+class MfgSummarySection(Base):
+    __tablename__ = "mfg_summary_section"
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False)
+    idx           = Column(Integer, nullable=False)  # порядок разделов в протоколе
+    start_ts      = Column(Float)    # опционально: начальная метка времени раздела
+    end_ts        = Column(Float)    # опционально: конечная метка времени раздела
+    title         = Column(Text)     # заголовок раздела
+    text          = Column(Text)     # содержимое раздела
+
+class MfgActionItem(Base):
+    __tablename__ = "mfg_action_item"
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False)
+    assignee      = Column(String)   # исполнитель
+    due_date      = Column(Date)     # срок (может быть NULL)
+    task          = Column(Text)     # формулировка задачи
+    priority      = Column(String)   # опционально: приоритет

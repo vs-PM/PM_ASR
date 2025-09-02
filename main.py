@@ -1,8 +1,9 @@
 import uvicorn
 from fastapi import FastAPI
-from app.v2.routers import transcription, diarization, pipeline, embeddings
+from app.v2.routers import transcription, diarization, pipeline, embeddings, summary
 from app.database import engine
 from app.logger import get_logger
+from app.errors import install_exception_handlers
 
 log = get_logger(__name__)
 
@@ -18,6 +19,7 @@ app.include_router(transcription.router, prefix="/transcription")
 app.include_router(diarization.router, prefix="/diarization")
 app.include_router(pipeline.router, prefix="/pipeline")
 app.include_router(embeddings.router, prefix="/embeddings")
+app.include_router(summary.router, prefix="/summary")
 
 # -------------------------------
 # События старта и остановки

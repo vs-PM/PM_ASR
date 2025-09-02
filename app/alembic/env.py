@@ -1,9 +1,11 @@
 import sys
 import pathlib
 import logging
+import asyncio
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool, types as sqltypes
+from sqlalchemy import pool, types as sqltypes
+from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic.autogenerate import renderers
 
 # --- путь до проекта ---
@@ -56,27 +58,32 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
+def do_run_migrations(connection):
+    """Общая настройка контекста для online/async."""
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
 
-def run_migrations_online() -> None:
-    """Миграции в online режиме (с подключением к БД)."""
-    connectable = engine_from_config(
+async def run_migrations_online() -> None:
+    """Миграции в online режиме (async)."""
+    connectable = async_engine_from_config(
         config.get_section(config.config_ini_section) or {},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-            compare_server_default=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+
+    await connectable.dispose()
 
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online()
+    asyncio.run(run_migrations_online())

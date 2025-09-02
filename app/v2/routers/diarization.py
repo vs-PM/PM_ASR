@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.background import process_diarization
-from app.database import async_session
+from app.database import get_session
 from app.models import MfgTranscript
 from app.schemas import DiarizationResponse
 from app.logger import get_logger
@@ -17,7 +17,7 @@ async def upload_diarization(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     meeting_id: int = Query(...),
-    session: AsyncSession = Depends(async_session)
+    session: AsyncSession = Depends(get_session)
 ):
     tmp_dir = Path("/tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)

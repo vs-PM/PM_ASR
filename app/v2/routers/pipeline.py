@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import async_session
+from app.database import get_session
 from app.models import MfgTranscript
 from app.background import process_pipeline
 from app.schemas import PipelineResponse
@@ -14,7 +14,7 @@ router = APIRouter()
 async def run_pipeline(
     background_tasks: BackgroundTasks,
     transcript_id: int,
-    session: AsyncSession = Depends(async_session)
+    session: AsyncSession = Depends(get_session)
 ):
     transcript = await session.get(MfgTranscript, transcript_id)
     if not transcript:

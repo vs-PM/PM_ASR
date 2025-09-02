@@ -2,13 +2,27 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # токен HuggingFace
+     # ---- HF token ----
     hf_token: str
+
+    # ---- Device ----
     device: str = "cuda"
-    # URL Ollama
+
+    # ---- Ollama ----
     ollama_url: str
-    # Название модели Ollama
-    model_name_embeded: str
+    embedding_model: str
+    summarize_model: str 
+    ollama_chat_timeout: int 
+    ollama_connect_timeout: int 
+    ollama_read_timeout: int 
+    ollama_write_timeout: int 
+    summarize_num_ctx: int              
+
+    # ---- RAG params ----
+    rag_chunk_char_limit: int              
+    rag_top_k: int                           
+    rag_min_score: float
+
     #----DB----
     ollama_db_host: str 
     ollama_db_port: int 

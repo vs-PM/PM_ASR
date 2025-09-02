@@ -47,6 +47,34 @@ class EmbeddingsResponse(BaseModel):
     transcript_id: int
     status: str
 
+
+# -----------------------------
+# /summary (Вариант B)
+# -----------------------------
+class SummaryStartResponse(BaseModel):
+    transcript_id: int
+    status: str  # processing
+
+class SummarySection(BaseModel):
+    idx: int
+    start_ts: Optional[float] = None
+    end_ts: Optional[float] = None
+    title: Optional[str] = None
+    text: Optional[str] = None
+
+class ActionItem(BaseModel):
+    id: int
+    assignee: Optional[str] = None
+    due_date: Optional[str] = None  # ISO "YYYY-MM-DD" или None
+    task: Optional[str] = None
+    priority: Optional[str] = None
+
+class SummaryGetResponse(BaseModel):
+    transcript_id: int
+    status: str
+    sections: List[SummarySection]
+    action_items: List[ActionItem]
+
 # -----------------------------
 # Статус транскрипции
 # -----------------------------

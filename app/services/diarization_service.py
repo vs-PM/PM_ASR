@@ -1,13 +1,19 @@
 import torch
 from pyannote.audio import Pipeline
 from pyannote.audio.pipelines import SpeakerDiarization
+from pyannote.audio.utils.reproducibility import ReproducibilityWarning
 from pathlib import Path
+from threading import Lock
+import warnings, time
 from app.config import settings
 from app.logger import get_logger
 import asyncio
+import subprocess
+import tempfile
+import torchaudio
 
 log = get_logger(__name__)
-MODEL_NAME = "pyannote/speaker-diarization"
+MODEL_NAME = "pyannote/speaker-diarization-3.1"
 
 def _load_pipeline() -> SpeakerDiarization:
     device = torch.device(settings.device if torch.cuda.is_available() else "cpu")
@@ -16,7 +22,61 @@ def _load_pipeline() -> SpeakerDiarization:
     log.info("Pyannote pipeline loaded")
     return pipeline
 
+_pipeline: SpeakerDiarization | None = None
+_pipeline_lock = Lock()
 _pipeline = _load_pipeline()
+
+
+def _load_pipeline_sync() -> SpeakerDiarization:
+    token = settings.hf_token
+    if not token:
+        raise RuntimeError("HF token is empty. Set HF_TOKEN/HUGGINGFACEHUB_API_TOKEN or settings.hf_token")
+    try:
+        pipe = Pipeline.from_pretrained(MODEL_NAME, use_auth_token=token)
+        if pipe is None:
+            raise RuntimeError("Pipeline.from_pretrained returned None (likely gated; accept terms for all components).")
+        device = torch.device(settings.device if torch.cuda.is_available() else "cpu")
+        pipe.to(device)
+        log.info("Pyannote pipeline loaded on %s", device)
+        return pipe
+    except Exception as e:
+        log.exception("Failed to load %s", MODEL_NAME)
+        raise
+
+def get_pipeline() -> SpeakerDiarization:
+    global _pipeline
+    if _pipeline is None:
+        with _pipeline_lock:
+            if _pipeline is None:
+                _pipeline = _load_pipeline_sync()
+    return _pipeline
+
+warnings.filterwarnings("ignore", category=ReproducibilityWarning)
+# раскомментировать для ускорения на NVIDIA:
+# torch.backends.cuda.matmul.allow_tf32 = True
+# torch.backends.cudnn.allow_tf32 = True
+
+def _to_wav_16k_mono(src_path: str) -> str:
+    """Конвертирует любой входной формат в временный WAV (mono, 16kHz). Возвращает путь к WAV."""
+    dst_path = Path(tempfile.gettempdir()) / (Path(src_path).stem + "_16k_mono.wav")
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", src_path,
+        "-ac", "1",             # mono
+        "-ar", "16000",         # 16 kHz
+        "-f", "wav",
+        str(dst_path)
+    ]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True, text=True)
+    except FileNotFoundError:
+        log.exception("ffmpeg not found. Please install ffmpeg.")
+        raise
+    except subprocess.CalledProcessError as e:
+        log.error("ffmpeg failed:\n%s", e.stderr)
+        raise
+    return str(dst_path)
+
 
 async def diarize_file(audio_path: str) -> list[dict]:
     """
@@ -25,11 +85,33 @@ async def diarize_file(audio_path: str) -> list[dict]:
     [{"speaker": "spk_0", "start_ts": 0.0, "end_ts": 10.5, "file_path": "/tmp/chunk_0.wav"}, ...]
     """
     loop = asyncio.get_running_loop()
-    diarization = await loop.run_in_executor(None, lambda: _pipeline(audio_path))
+    # diarization = await loop.run_in_executor(None, lambda: _pipeline(audio_path))
 
-    import torchaudio
-    wav, sr = torchaudio.load(audio_path)
-    base = Path(audio_path).stem
+    # 1) Гарантированно переводим в WAV 16k mono, чтобы обойти m4a и пр.
+    wav_path = await loop.run_in_executor(None, lambda: _to_wav_16k_mono(audio_path))
+
+    # 2) Получаем (или лениво создаём) пайплайн
+    try:
+        pipeline = await loop.run_in_executor(None, get_pipeline)
+    except Exception as e:
+        # Завалим задачу явной ошибкой (фон обработает)
+        raise RuntimeError(f"pyannote pipeline init failed: {e}") from e
+
+    diarization = await loop.run_in_executor(None, lambda: _pipeline(wav_path))
+    # 3) Пропускаем через pyannote (важно: 3.x ждёт {"audio": path} / или waveform)
+    t0 = time.time()
+    try:
+        diarization = await loop.run_in_executor(
+            None, lambda: _pipeline({"audio": wav_path})
+        )
+        log.info(f"pyannote diarization done in {time.time() - t0:.2f}s for {wav_path}")
+    except Exception as e:
+        log.exception("pyannote pipeline failed")
+        raise
+
+    # 4) Грузим тот же WAV для нарезки чанков
+    wav, sr = torchaudio.load(wav_path)
+    base = Path(wav_path).stem
     tmp_dir = Path("/tmp/chunks")
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -47,4 +129,10 @@ async def diarize_file(audio_path: str) -> list[dict]:
             "file_path": str(clip_path)
         })
     log.info(f"Diarization produced {len(chunks)} chunks for {audio_path}")
+    # 5) Чистим временный WAV
+    try:
+        Path(wav_path).unlink(missing_ok=True)
+    except Exception:
+        log.warning("Failed to remove temp wav: %s", wav_path)
+
     return chunks

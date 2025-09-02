@@ -4,6 +4,7 @@ from app.services.asr_service import transcribe_file
 from app.services.diarization_service import diarize_file
 from app.services.embeddings_service import embed_text
 from app.services.pipeline_service import process_pipeline_segments
+from app.services.summary_service import generate_protocol
 from app.database import async_session
 from app.models import MfgTranscript, MfgDiarization, MfgSegment, MfgEmbedding
 from app.logger import get_logger
@@ -137,3 +138,35 @@ async def process_embeddings(transcript_id: int):
             session.add(transcript)
             await session.commit()
             log.exception(f"Ошибка при генерации эмбеддингов для transcript_id={transcript_id}")
+
+# ----------------------------
+# 5️⃣ Суммаризация (итоговый протокол)
+# ----------------------------
+async def process_summary(transcript_id: int, lang: str = "ru", format_: str = "json"):
+    log.info(f"Запуск суммаризации для transcript_id={transcript_id}")
+    async with async_session() as session:
+        transcript = await session.get(MfgTranscript, transcript_id)
+        if not transcript:
+            log.error("Transcript %s not found", transcript_id)
+            return
+        try:
+            transcript.status = "summary_processing"
+            session.add(transcript)
+            await session.commit()
+
+            await generate_protocol(transcript_id, lang=lang, output_format=format_)
+
+            transcript = await session.get(MfgTranscript, transcript_id)
+            if transcript:
+                transcript.status = "summary_done"
+                session.add(transcript)
+                await session.commit()
+            log.info("Суммаризация завершена для transcript_id=%s", transcript_id)
+        except Exception:
+            # при ошибке пишем error
+            transcript = await session.get(MfgTranscript, transcript_id)
+            if transcript:
+                transcript.status = "error"
+                session.add(transcript)
+                await session.commit()
+            log.exception("Ошибка суммаризации для transcript_id=%s", transcript_id)
