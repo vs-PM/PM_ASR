@@ -1,4 +1,3 @@
-# app/services/pipeline_service.py
 from __future__ import annotations
 
 import math
@@ -9,50 +8,15 @@ import torchaudio
 import torch
 
 from sqlalchemy import select
-from app.services.asr_service import transcribe_file  # будем вызывать на временном файле как fallback
-from app.database import async_session
-from app.models import MfgDiarization, MfgSegment, MfgTranscript
-from app.logger import get_logger
+from app.services.pipeline.asr import transcribe_file  # будем вызывать на временном файле как fallback
+from app.db.session import async_session
+from app.db.models import MfgDiarization, MfgSegment, MfgTranscript
+from app.core.logger import get_logger
 import tempfile
+from app.services.pipeline.asr import transcribe_window_from_wav
 from pathlib import Path
 
 log = get_logger(__name__)
-
-
-async def _transcribe_window_from_wav(
-    wav_path: str, start_ts: float, end_ts: float
-) -> str:
-    """
-    Быстрый транскрипт тайм-окна [start_ts, end_ts] из общего WAV.
-    Пытаемся не создавать файлов. Если у твоего ASR уже есть функция работы с тензором —
-    используй её тут. Пока делаем через временный WAV для совместимости.
-    """
-    # Загружаем и режем по сэмплам
-    wav, sr = torchaudio.load(wav_path)  # [channels, samples]
-    s = max(0, int(math.floor(start_ts * sr)))
-    e = min(wav.shape[-1], int(math.ceil(end_ts * sr)))
-    if e <= s:
-        return ""
-
-    clip = wav[:, s:e]
-
-    # Если у тебя есть прямой вызов по тензору (без файла), замени блок ниже на него:
-    # text = await transcribe_tensor(clip, sr)
-    # return text
-
-    # Fallback: пишем во временный файл и используем существующий transcribe_file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpf:
-        tmp_path = tmpf.name
-    try:
-        torchaudio.save(tmp_path, clip, sr)
-        text = await transcribe_file(tmp_path)
-        return text or ""
-    finally:
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            log.warning("Не удалось удалить временный файл сегмента: %s", tmp_path)
-
 
 async def process_pipeline_segments(transcript_id: int):
     """
@@ -109,9 +73,9 @@ async def process_pipeline_segments(transcript_id: int):
         created = 0
         for wav_path, segs in groups.items():
             # Опционально: можно один раз загрузить аудио и резать тензор,
-            # но мы уже делаем это внутри _transcribe_window_from_wav по необходимости.
+            # но мы уже делаем это внутри transcribe_window_from_wav по необходимости.
             for d in segs:
-                text = await _transcribe_window_from_wav(wav_path, float(d.start_ts), float(d.end_ts))
+                text = await transcribe_window_from_wav(wav_path, float(d.start_ts), float(d.end_ts))
                 segment = MfgSegment(
                     transcript_id=transcript_id,
                     speaker=d.speaker,

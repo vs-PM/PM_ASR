@@ -7,13 +7,13 @@ from typing import List, Dict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
-from app.models import MfgSegment, MfgSummarySection
-from app.logger import get_logger
-from app.config import settings
+from app.db.session import async_session
+from app.db.models import MfgSegment, MfgSummarySection
+from app.core.logger import get_logger
+from app.core.config import settings
 
 # ВАЖНО: правильный модуль с промптами
-from .promts import (
+from .prompts import (
     system_prompt_for,
     render_batch_user_prompt,
     render_final_user_prompt,
@@ -25,7 +25,7 @@ from .rag import (
     build_global_refs,
 )
 from .client import ollama_chat
-from app.services.embeddings_service import embed_text
+from app.services.pipeline.embeddings import embed_text
 
 log = get_logger(__name__)
 

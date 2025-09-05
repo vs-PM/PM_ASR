@@ -1,7 +1,7 @@
 import httpx 
 from typing import List
-from app.config import settings
-from app.logger import get_logger
+from app.core.config import settings
+from app.core.logger import get_logger
 
 log = get_logger(__name__)
 

@@ -4,11 +4,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_session
-from app.models import MfgTranscript, MfgSummarySection
-from app.background import process_summary
-from app.logger import get_logger
-from app.schemas import SummaryStartResponse, SummaryGetResponse
+from app.db.session import get_session
+from app.db.models import MfgTranscript, MfgSummarySection
+from app.services.jobs.api import process_summary
+from app.core.logger import get_logger
+from app.schemas.api import SummaryStartResponse, SummaryGetResponse
 
 log = get_logger(__name__)
 router = APIRouter()

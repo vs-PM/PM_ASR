@@ -1,8 +1,8 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
-from app.config import settings
-from app.logger import get_logger
+from app.core.config import settings
+from app.core.logger import get_logger
 
 log = get_logger(__name__)
 

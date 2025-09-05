@@ -10,9 +10,9 @@ from typing import List, Optional
 import numpy as np
 import webrtcvad  # pip install webrtcvad
 
-from app.logger import get_logger
-from app.config import settings
-from app.services.ffmpeg_utils import convert_to_wav16k_mono
+from app.core.logger import get_logger
+from app.core.config import settings
+from app.services.pipeline.media import convert_to_wav16k_mono
 
 log = get_logger(__name__)
 

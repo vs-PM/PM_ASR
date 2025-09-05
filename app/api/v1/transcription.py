@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query, Depends
-from app.schemas import RecognizeResponse
-from app.background import process_transcription
-from app.database import async_session, get_session
-from app.models import MfgTranscript
-from app.logger import get_logger
+from app.schemas.api import RecognizeResponse
+from app.services.jobs.api import process_transcription
+from app.db.session import async_session, get_session
+from app.db.models import MfgTranscript
+from app.core.logger import get_logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = get_logger(__name__)

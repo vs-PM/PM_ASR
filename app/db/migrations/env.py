@@ -13,9 +13,9 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # --- импорт базовой модели и настроек ---
-from app.models import Base
-from app.config import settings
-from app.logger import get_logger
+from app.db.models import Base
+from app.core.config import settings
+from app.core.logger import get_logger
 
 # Поддержка pgvector
 from pgvector.sqlalchemy import Vector

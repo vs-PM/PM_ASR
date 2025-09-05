@@ -18,6 +18,7 @@ sdist/
 *.log
 venv/
 .venv/
+vvs-non/
 
 # 2️⃣  IDE / Editor artefacts
 # --------------------------------------------------

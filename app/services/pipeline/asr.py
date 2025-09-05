@@ -1,4 +1,3 @@
-# app/services/asr_service.py
 from __future__ import annotations
 
 import math
@@ -10,7 +9,7 @@ import torch
 import torchaudio
 from faster_whisper import WhisperModel
 
-from app.logger import get_logger
+from app.core.logger import get_logger
 
 log = get_logger(__name__)
 

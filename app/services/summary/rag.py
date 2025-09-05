@@ -7,8 +7,8 @@ from typing import List, Tuple
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MfgSegment
-from app.logger import get_logger
+from app.db.models import MfgSegment
+from app.core.logger import get_logger
 
 log = get_logger(__name__)
 

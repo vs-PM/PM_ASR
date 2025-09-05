@@ -5,7 +5,7 @@ import shlex
 import time
 from pathlib import Path
 from typing import Optional, Tuple
-from app.logger import get_logger
+from app.core.logger import get_logger
 
 log = get_logger(__name__)
 

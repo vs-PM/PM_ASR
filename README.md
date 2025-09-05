@@ -165,8 +165,8 @@ speech-to-text/
 Пример лог‑строки:
 
 ```
-2025-08-26 15:02:10 | INFO     | app.services.asr_service:61 | Running diarization
-2025-08-26 15:02:12 | DEBUG    | app.services.asr_service:102 | Whisper generated 12 sub‑segments
+2025-08-26 15:02:10 | INFO     | app.services.pipeline.asr:61 | Running diarization
+2025-08-26 15:02:12 | DEBUG    | app.services.pipeline.asr:102 | Whisper generated 12 sub‑segments
 ```
 
 ---

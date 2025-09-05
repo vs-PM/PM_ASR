@@ -1,10 +1,10 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_session
-from app.models import MfgTranscript
-from app.background import process_embeddings
-from app.schemas import EmbeddingsResponse
-from app.logger import get_logger
+from app.db.session import get_session
+from app.db.models import MfgTranscript
+from app.services.jobs.api import process_embeddings
+from app.schemas.api import EmbeddingsResponse
+from app.core.logger import get_logger
 
 log = get_logger(__name__)
 router = APIRouter()

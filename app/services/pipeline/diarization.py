@@ -12,9 +12,9 @@ from pyannote.audio import Pipeline
 from pyannote.audio.pipelines import SpeakerDiarization
 from pyannote.audio.utils.reproducibility import ReproducibilityWarning
 
-from app.config import settings
-from app.logger import get_logger
-from app.services.ffmpeg_utils import convert_to_wav16k_mono
+from app.core.config import settings
+from app.core.logger import get_logger
+from app.services.pipeline.media import convert_to_wav16k_mono
 
 log = get_logger(__name__)
 warnings.filterwarnings("ignore", category=ReproducibilityWarning)
