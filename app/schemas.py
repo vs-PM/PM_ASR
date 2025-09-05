@@ -72,8 +72,7 @@ class ActionItem(BaseModel):
 class SummaryGetResponse(BaseModel):
     transcript_id: int
     status: str
-    sections: List[SummarySection]
-    action_items: List[ActionItem]
+    text: str
 
 # -----------------------------
 # Статус транскрипции
@@ -81,3 +80,8 @@ class SummaryGetResponse(BaseModel):
 class TranscriptStatus(BaseModel):
     status: str
     segments: Optional[List[SegmentInfo]] = None
+
+class ProtokolResponse(BaseModel):
+    transcript_id: int
+    status: str
+    filename: str

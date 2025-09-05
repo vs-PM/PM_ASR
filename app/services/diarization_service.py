@@ -1,47 +1,41 @@
+from __future__ import annotations
+
+import asyncio
+import time
+import warnings
+from pathlib import Path
+from threading import Lock
+from typing import List, Dict
+
 import torch
 from pyannote.audio import Pipeline
 from pyannote.audio.pipelines import SpeakerDiarization
 from pyannote.audio.utils.reproducibility import ReproducibilityWarning
-from pathlib import Path
-from threading import Lock
-import warnings, time
+
 from app.config import settings
 from app.logger import get_logger
-import asyncio
-import subprocess
-import tempfile
-import torchaudio
+from app.services.ffmpeg_utils import convert_to_wav16k_mono
 
 log = get_logger(__name__)
+warnings.filterwarnings("ignore", category=ReproducibilityWarning)
+
 MODEL_NAME = "pyannote/speaker-diarization-3.1"
 
-def _load_pipeline() -> SpeakerDiarization:
-    device = torch.device(settings.device if torch.cuda.is_available() else "cpu")
-    pipeline = Pipeline.from_pretrained(MODEL_NAME, use_auth_token=settings.hf_token)
-    pipeline.to(device)
-    log.info("Pyannote pipeline loaded")
-    return pipeline
-
+# ─────────────────────────────────────────
+# Lazy singleton pipeline
+# ─────────────────────────────────────────
 _pipeline: SpeakerDiarization | None = None
 _pipeline_lock = Lock()
-_pipeline = _load_pipeline()
-
 
 def _load_pipeline_sync() -> SpeakerDiarization:
     token = settings.hf_token
     if not token:
-        raise RuntimeError("HF token is empty. Set HF_TOKEN/HUGGINGFACEHUB_API_TOKEN or settings.hf_token")
-    try:
-        pipe = Pipeline.from_pretrained(MODEL_NAME, use_auth_token=token)
-        if pipe is None:
-            raise RuntimeError("Pipeline.from_pretrained returned None (likely gated; accept terms for all components).")
-        device = torch.device(settings.device if torch.cuda.is_available() else "cpu")
-        pipe.to(device)
-        log.info("Pyannote pipeline loaded on %s", device)
-        return pipe
-    except Exception as e:
-        log.exception("Failed to load %s", MODEL_NAME)
-        raise
+        raise RuntimeError("HF token is empty. Set HF_TOKEN in .env")
+    device = torch.device(settings.device if torch.cuda.is_available() and settings.device.startswith("cuda") else "cpu")
+    pipe = Pipeline.from_pretrained(MODEL_NAME, use_auth_token=token)
+    pipe.to(device)
+    log.info("Pyannote pipeline loaded on %s", device)
+    return pipe
 
 def get_pipeline() -> SpeakerDiarization:
     global _pipeline
@@ -51,88 +45,70 @@ def get_pipeline() -> SpeakerDiarization:
                 _pipeline = _load_pipeline_sync()
     return _pipeline
 
-warnings.filterwarnings("ignore", category=ReproducibilityWarning)
-# раскомментировать для ускорения на NVIDIA:
-# torch.backends.cuda.matmul.allow_tf32 = True
-# torch.backends.cudnn.allow_tf32 = True
-
-def _to_wav_16k_mono(src_path: str) -> str:
-    """Конвертирует любой входной формат в временный WAV (mono, 16kHz). Возвращает путь к WAV."""
-    dst_path = Path(tempfile.gettempdir()) / (Path(src_path).stem + "_16k_mono.wav")
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", src_path,
-        "-ac", "1",             # mono
-        "-ar", "16000",         # 16 kHz
-        "-f", "wav",
-        str(dst_path)
-    ]
-    try:
-        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True, text=True)
-    except FileNotFoundError:
-        log.exception("ffmpeg not found. Please install ffmpeg.")
-        raise
-    except subprocess.CalledProcessError as e:
-        log.error("ffmpeg failed:\n%s", e.stderr)
-        raise
-    return str(dst_path)
-
-
-async def diarize_file(audio_path: str) -> list[dict]:
+# ─────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────
+def _merge_chunks(chunks: List[Dict], min_len: float = 1.0, max_gap: float = 0.3) -> List[Dict]:
     """
-    Разбивает аудио на сегменты по спикерам.
-    Возвращает список:
-    [{"speaker": "spk_0", "start_ts": 0.0, "end_ts": 10.5, "file_path": "/tmp/chunk_0.wav"}, ...]
+    Склеиваем подряд идущие сегменты одного спикера с небольшой паузой между ними
+    и прилипляем слишком короткие огрызки (< min_len) к предыдущему сегменту.
     """
+    if not chunks:
+        return []
+    merged: List[Dict] = [dict(chunks[0])]
+    for c in chunks[1:]:
+        last = merged[-1]
+        if c["speaker"] == last["speaker"] and (c["start_ts"] - last["end_ts"]) <= max_gap:
+            last["end_ts"] = c["end_ts"]
+        else:
+            merged.append(dict(c))
+
+    out: List[Dict] = []
+    for m in merged:
+        dur = m["end_ts"] - m["start_ts"]
+        if dur >= min_len or not out:
+            out.append(m)
+        else:
+            # коротыш -> прилипляем хвостом к предыдущему
+            out[-1]["end_ts"] = m["end_ts"]
+    return out
+
+# ─────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────
+async def diarize_file(audio_path: str) -> List[Dict]:
+    """
+    Диаризация; возвращает список сегментов:
+    [{"speaker": "SPEAKER_00", "start_ts": float, "end_ts": float, "file_path": "<wav16k mono>"}]
+    В file_path кладём единый WAV 16k mono (без нарезки на диск).
+    """
+    # 1) быстрый конверт/нормализация формата
+    wav16k_path = await convert_to_wav16k_mono(audio_path, threads=0)  # 0 = пусть ffmpeg сам решит
+    log.debug("Using WAV for diarization: %s", wav16k_path)
+
+    # 2) лениво получаем пайплайн и считаем
     loop = asyncio.get_running_loop()
-    # diarization = await loop.run_in_executor(None, lambda: _pipeline(audio_path))
+    pipeline = await loop.run_in_executor(None, get_pipeline)
 
-    # 1) Гарантированно переводим в WAV 16k mono, чтобы обойти m4a и пр.
-    wav_path = await loop.run_in_executor(None, lambda: _to_wav_16k_mono(audio_path))
-
-    # 2) Получаем (или лениво создаём) пайплайн
-    try:
-        pipeline = await loop.run_in_executor(None, get_pipeline)
-    except Exception as e:
-        # Завалим задачу явной ошибкой (фон обработает)
-        raise RuntimeError(f"pyannote pipeline init failed: {e}") from e
-
-    diarization = await loop.run_in_executor(None, lambda: _pipeline(wav_path))
-    # 3) Пропускаем через pyannote (важно: 3.x ждёт {"audio": path} / или waveform)
     t0 = time.time()
-    try:
-        diarization = await loop.run_in_executor(
-            None, lambda: _pipeline({"audio": wav_path})
-        )
-        log.info(f"pyannote diarization done in {time.time() - t0:.2f}s for {wav_path}")
-    except Exception as e:
-        log.exception("pyannote pipeline failed")
-        raise
+    # В 3.x корректный вызов — словарь с ключом "audio" (можно и путь, но так надёжнее)
+    diarization = await loop.run_in_executor(None, lambda: pipeline({"audio": wav16k_path}))
+    elapsed = time.time() - t0
+    log.info("pyannote diarization done in %.2fs for %s", elapsed, wav16k_path)
 
-    # 4) Грузим тот же WAV для нарезки чанков
-    wav, sr = torchaudio.load(wav_path)
-    base = Path(wav_path).stem
-    tmp_dir = Path("/tmp/chunks")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    chunks = []
+    # 3) собираем сегменты (без записи чанков на диск)
+    chunks: List[Dict] = []
     for idx, (turn, _, speaker) in enumerate(diarization.itertracks(yield_label=True)):
-        start_sample = int(turn.start * sr)
-        end_sample = int(turn.end * sr)
-        clip = wav[:, start_sample:end_sample]
-        clip_path = tmp_dir / f"{base}_{speaker}_{idx}.wav"
-        torchaudio.save(clip_path, clip, sr)
         chunks.append({
             "speaker": speaker,
             "start_ts": float(turn.start),
             "end_ts": float(turn.end),
-            "file_path": str(clip_path)
+            "file_path": str(wav16k_path),
         })
-    log.info(f"Diarization produced {len(chunks)} chunks for {audio_path}")
-    # 5) Чистим временный WAV
-    try:
-        Path(wav_path).unlink(missing_ok=True)
-    except Exception:
-        log.warning("Failed to remove temp wav: %s", wav_path)
+
+    # 4) пост-обработка (склейка)
+    before = len(chunks)
+    chunks = _merge_chunks(chunks, min_len=1.0, max_gap=0.3)
+    log.info("Diarization produced %d -> %d segments (merged) for %s", before, len(chunks), audio_path)
 
     return chunks

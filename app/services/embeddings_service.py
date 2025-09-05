@@ -15,7 +15,7 @@ async def embed_text(text: str) -> List[float] | None:
     payload = {"model": settings.embedding_model, "input": text} 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            log.debug(f"Requesting embedding: model={settings.embedding_model}")
+            # log.debug(f"Requesting embedding: model={settings.embedding_model}")
             resp = await client.post(url, json=payload, timeout=10.0)
             resp.raise_for_status()
             data = resp.json()
@@ -24,7 +24,7 @@ async def embed_text(text: str) -> List[float] | None:
             if not (isinstance(embeddings, list) and embeddings and isinstance(embeddings[0], list)):
                 raise ValueError("No 'embeddings'[[...]] in response")
             vec = embeddings[0]
-            log.debug(f"Received embedding of length {len(vec)}")
+            # log.debug(f"Received embedding of length {len(vec)}")
             return vec
         except httpx.HTTPError as exc:
             log.exception(f"HTTP error during embedding request to {url}: {exc}")

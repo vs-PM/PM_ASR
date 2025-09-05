@@ -1,33 +1,58 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+
 from app.database import get_session
-from app.models import MfgTranscript, MfgSummarySection, MfgActionItem
+from app.models import MfgTranscript, MfgSummarySection
 from app.background import process_summary
 from app.logger import get_logger
-from app.schemas import SummaryStartResponse, SummaryGetResponse, SummarySection, ActionItem
+from app.schemas import SummaryStartResponse, SummaryGetResponse
 
 log = get_logger(__name__)
 router = APIRouter()
+
 
 @router.post("/{transcript_id}", response_model=SummaryStartResponse)
 async def run_summary(
     background_tasks: BackgroundTasks,
     transcript_id: int,
     lang: str = Query("ru"),
-    format_: str = Query("json", alias="format"),
+    format_: str = Query("text", alias="format"),
     session: AsyncSession = Depends(get_session),
 ):
+    # 1) убедимся, что есть транскрипт
     trs = await session.get(MfgTranscript, transcript_id)
     if not trs:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
+    # 2) статус процесса
     trs.status = "summary_processing"
     session.add(trs)
+
+    # 3) очистим все старые секции для данного transcript_id
+    await session.execute(
+        delete(MfgSummarySection).where(MfgSummarySection.transcript_id == transcript_id)
+    )
     await session.commit()
 
+    # 4) создаём пустую запись idx=0 (контейнер для текста)
+    section = MfgSummarySection(
+        transcript_id=transcript_id,
+        idx=0,
+        start_ts=0.0,
+        end_ts=0.0,
+        title="draft",
+        text="",
+    )
+    session.add(section)
+    await session.commit()
+
+    # 5) запустим фон
     background_tasks.add_task(process_summary, transcript_id, lang, format_)
     return SummaryStartResponse(transcript_id=transcript_id, status="processing")
+
 
 @router.get("/{transcript_id}", response_model=SummaryGetResponse)
 async def get_summary(
@@ -38,41 +63,20 @@ async def get_summary(
     if not trs:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
-    sections = (
+    section = (
         await session.execute(
             select(MfgSummarySection)
             .where(MfgSummarySection.transcript_id == transcript_id)
-            .order_by(MfgSummarySection.idx)
+            .where(MfgSummarySection.idx == 1)
+            .limit(1)
         )
-    ).scalars().all()
+    ).scalar_one_or_none()
 
-    items = (
-        await session.execute(
-            select(MfgActionItem)
-            .where(MfgActionItem.transcript_id == transcript_id)
-            .order_by(MfgActionItem.id)
-        )
-    ).scalars().all()
+    text = section.text if section else ""
+    status = trs.status or ("summary_done" if text else "summary_processing")
 
     return SummaryGetResponse(
         transcript_id=transcript_id,
-        status=trs.status,
-        sections=[
-            SummarySection(
-                idx=s.idx,
-                start_ts=s.start_ts,
-                end_ts=s.end_ts,
-                title=s.title,
-                text=s.text,
-            ) for s in sections
-        ],
-        action_items=[
-            ActionItem(
-                id=a.id,
-                assignee=a.assignee,
-                due_date=a.due_date.isoformat() if a.due_date else None,
-                task=a.task,
-                priority=a.priority,
-            ) for a in items
-        ]
+        status=status,
+        text=text or "",
     )
