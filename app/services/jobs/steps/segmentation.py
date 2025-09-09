@@ -15,7 +15,7 @@ async def run(transcript_id: int, audio_path: str, mode: str = "vad") -> int:
         for c in chunks:
             s.add(MfgDiarization(
                 transcript_id=transcript_id,
-                speaker=c["speaker"],
+                speaker=c.get("speaker"),
                 start_ts=c["start_ts"],
                 end_ts=c["end_ts"],
                 file_path=wav16k,

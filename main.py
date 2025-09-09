@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
 from app.api.v1 import transcription, diarization, pipeline, embeddings, summary, protokol
-from app.db.session import engine
+from app.db.session import async_engine
 from app.core.logger import get_logger
 from app.core.errors import install_exception_handlers
 
@@ -33,7 +33,7 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     log.info("Application shutdown")
-    await engine.dispose()
+    await async_engine.dispose()
 
 
 if __name__ == "__main__":

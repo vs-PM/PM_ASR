@@ -1,6 +1,6 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (
-    Column, BigInteger, String, Text, ForeignKey, Float, Date, Integer, func
+    Column, BigInteger, String, Text, ForeignKey, Float, Date, Integer, func, Boolean, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP as PG_TIMESTAMP
 from pgvector.sqlalchemy import Vector
@@ -29,6 +29,11 @@ class MfgSegment(Base):
     start_ts      = Column(Float)   
     end_ts        = Column(Float)   
     text          = Column(Text)
+    lang          = Column(String)  # ISO-код языка сегмента, опционально
+    updated_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+    __table_args__ = (
+        UniqueConstraint("transcript_id", "start_ts", "end_ts", name="uq_mfg_segments_tid_range"),
+    )
 
 class MfgDiarization(Base):
     __tablename__ = "mfg_diarization"
@@ -63,3 +68,56 @@ class MfgActionItem(Base):
     due_date      = Column(Date)     # срок (может быть NULL)
     task          = Column(Text)     # формулировка задачи
     priority      = Column(String)   # опционально: приоритет
+
+class MfgJob(Base):
+    """
+    Текущее состояние джобы по конкретному transcript_id.
+    Если хотите поддержать несколько запусков — допускайте несколько строк на transcript_id
+    (тогда уберите unique-индекс и добавьте поле run_id).
+    """
+    __tablename__ = "mfg_job"
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False, index=True, unique=True)
+    status        = Column(String(64), nullable=False, default="processing")  # те же строки, что и в MfgTranscript.status
+    progress      = Column(Integer, nullable=False, default=0)                # 0..100
+    step          = Column(String(128), nullable=True)                        # человекочитаемый шаг ("diarization", "asr"...)
+    error         = Column(Text, nullable=True)
+
+    worker_node   = Column(String(128), nullable=True)    # опционально: hostname/instance id
+    attempt       = Column(Integer, nullable=False, default=1)
+    started_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    finished_at   = Column(PG_TIMESTAMP(timezone=True), nullable=True)
+    created_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class MfgJobEvent(Base):
+    """
+    История смен статусов/прогресса для аудита и графиков.
+    """
+    __tablename__ = "mfg_job_event"
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False, index=True)
+    status        = Column(String(64), nullable=False)     # новое состояние
+    progress      = Column(Integer, nullable=True)         # 0..100
+    step          = Column(String(128), nullable=True)
+    message       = Column(Text, nullable=True)
+    created_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class MfgSpeaker(Base):
+    """
+    Справочник отображаемых имён/цветов для speaker-label'ов по транскрипту.
+    """
+    __tablename__ = "mfg_speaker"
+
+    id            = Column(BigInteger, primary_key=True, autoincrement=True)
+    transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False, index=True)
+    speaker       = Column(String, nullable=False)         # 'SPEECH' / 'SPEAKER_00' / 'spk_0' и т.п.
+    display_name  = Column(String, nullable=True)          # "Иван", "Оператор", ...
+    color         = Column(String(16), nullable=True)      # "#RRGGBB"
+    is_active     = Column(Boolean, nullable=False, default=True)
+    created_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

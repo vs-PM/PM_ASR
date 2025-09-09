@@ -9,8 +9,20 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic.autogenerate import renderers
 
 # --- путь до проекта ---
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
+CURRENT_FILE = pathlib.Path(__file__).resolve()
+# /.../PM_ASR/app/db/migrations/env.py
+# parents: [migrations, db, app, PM_ASR, ...]
+for up in range(3, len(CURRENT_FILE.parents)):
+    candidate = CURRENT_FILE.parents[up]
+    if (candidate / "app").is_dir():
+        PROJECT_ROOT = candidate
+        break
+else:
+    # Fallback: на случай необычной структуры
+    PROJECT_ROOT = CURRENT_FILE.parents[3]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # --- импорт базовой модели и настроек ---
 from app.db.models import Base

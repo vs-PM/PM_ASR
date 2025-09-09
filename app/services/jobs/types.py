@@ -7,7 +7,7 @@ class JobStatus(str, Enum):
     NEW = "new"
     DIAR_PROC = "diarization_processing"
     DIAR_DONE = "diarization_done"
-    PIPE_PROC = "pipeline_processing"
+    PIPE_PROC = "transcription_processing"
     PIPE_DONE = "transcription_done"
     EMB_PROC = "embeddings_processing"
     EMB_DONE = "embeddings_done"

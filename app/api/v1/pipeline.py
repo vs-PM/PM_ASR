@@ -22,7 +22,7 @@ async def run_pipeline(
 
     # Запускаем фоновой pipeline
     background_tasks.add_task(process_pipeline, transcript_id)
-    transcript.status = "pipeline_processing"
+    transcript.status = "transcription_processing"
     session.add(transcript)
     await session.commit()
 
