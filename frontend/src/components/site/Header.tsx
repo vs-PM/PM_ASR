@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
+import LogoutButton from "./LogoutButton";
 
 export type Me =
   | {
@@ -46,14 +47,7 @@ export function Header({ me }: { me: Me }) {
           {me ? (
             <div className="flex items-center gap-2 text-sm">
               <span className="font-medium">{displayName}</span>
-              <form action="/api/v1/auth/logout" method="post">
-                <button
-                  className="px-3 py-1 border rounded-md hover:bg-gray-50"
-                  formAction="/api/v1/auth/logout"
-                >
-                  Выйти
-                </button>
-              </form>
+              <LogoutButton />
             </div>
           ) : (
             <Link href="/login" className="px-3 py-1 border rounded-md hover:bg-gray-50 text-sm">
