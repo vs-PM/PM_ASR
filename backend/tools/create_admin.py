@@ -1,5 +1,5 @@
 import asyncio, getpass
-from passlib.hash import bcrypt
+from app.core.security import hash_password
 from sqlalchemy import select
 from app.db.session import async_session
 from app.db.models import MfgUser, UserRole
@@ -12,7 +12,7 @@ async def main():
         if exists:
             print("User exists")
             return
-        u = MfgUser(login=login, password_hash=bcrypt.hash(pwd), role=UserRole.admin, is_active=True)
+        u = MfgUser(login=login, password_hash=hash_password(pwd), role=UserRole.admin, is_active=True)
         s.add(u); await s.commit(); print("Admin created")
 
 asyncio.run(main())

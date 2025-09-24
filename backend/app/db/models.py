@@ -3,7 +3,7 @@ from sqlalchemy import (
     Column, BigInteger, String, Text, ForeignKey, Float, Date, Integer, func, Boolean, UniqueConstraint,
 )
 import enum
-from sqlalchemy import Enum
+from sqlalchemy import Enum, Index
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP as PG_TIMESTAMP
 from pgvector.sqlalchemy import Vector
@@ -21,6 +21,7 @@ class MfgTranscript(Base):
     raw_text       = Column(Text)
     file_path      = Column(Text)
     mfg_id         = Column(String)
+    file_id        = Column(BigInteger, ForeignKey("mfg_file.id", ondelete="SET NULL"), nullable=True)
     filename       = Column(String)
     status         = Column(String, nullable=False)  # processing, diarization_done, transcription_done, embeddings_done, done, error
     title          = Column(String, nullable=True)  # Название митинга (для UI)
@@ -176,3 +177,30 @@ class MfgAuditLog(Base):
     meta        = Column(JSONB, nullable=True)
     created_at  = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
+class RefreshToken(Base):
+    """Hashed refresh tokens with rotation support."""
+    __tablename__ = "auth_refresh_token"
+
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id     = Column(BigInteger, ForeignKey("mfg_user.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash  = Column(String(255), nullable=False)
+    fingerprint = Column(String(64), nullable=False, unique=True, index=True)  # sha256 hex
+    user_agent  = Column(String(256), nullable=True)
+    ip          = Column(String(64), nullable=True)
+    parent_id   = Column(BigInteger, ForeignKey("auth_refresh_token.id", ondelete="SET NULL"), nullable=True)
+    expires_at  = Column(PG_TIMESTAMP(timezone=True), nullable=False)
+    revoked_at  = Column(PG_TIMESTAMP(timezone=True), nullable=True)
+    created_at  = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+class MfgFile(Base):
+    __tablename__ = "mfg_file"
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id     = Column(BigInteger, ForeignKey("mfg_user.id", ondelete="SET NULL"), index=True)
+    filename    = Column(String, nullable=False)          # оригинальное имя
+    stored_path = Column(Text, nullable=False)            # путь на диске
+    size_bytes  = Column(BigInteger)
+    mimetype    = Column(String)
+    duration_s  = Column(Float)                           # если посчитаешь через ffprobe
+    created_at  = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+Index("ix_mfg_file_user_created", MfgFile.user_id, MfgFile.created_at.desc())

@@ -67,6 +67,18 @@ class Settings(BaseSettings):
     ollam_prod: bool = Field(..., description="Прод-режим логирования (OLLAM_PROD)")
     ollama_log_path: str = Field(..., description="Файл логов (OLLAMA_LOG_PATH)")
 
+    # ───────── Auth / JWT / Cookies ─────────
+    jwt_secret: str = Field("change_me_dev_secret", description="Секрет для подписи JWT", alias="JWT_SECRET")
+    jwt_algo: str = Field("HS256", description="Алгоритм подписи JWT", alias="JWT_ALGO")
+
+    access_ttl_minutes: int = Field(15, description="TTL access-токена (мин.)", alias="ACCESS_TTL_MINUTES")
+    refresh_ttl_days: int = Field(14, description="TTL refresh-токена (дн.)", alias="REFRESH_TTL_DAYS")
+
+    cookie_domain: str | None = Field(None, description="Домен для auth-куки (опц.)", alias="COOKIE_DOMAIN")
+    cookie_secure: bool = Field(True, description="Secure-флаг для auth-куки", alias="COOKIE_SECURE")
+    
+    upload_dir: str = "/data/uploads"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

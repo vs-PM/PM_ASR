@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # -----------------------------
 # Общие схемы
@@ -85,3 +85,25 @@ class ProtokolResponse(BaseModel):
     transcript_id: int
     status: str
     filename: str
+
+# --- Files API ---
+class FileOut(BaseModel):
+    id: int
+    filename: str
+    size_bytes: Optional[int] = None
+    mimetype: Optional[str] = None
+    created_at: Optional[str] = None  # ISO строка
+
+class FilesListResponse(BaseModel):
+    items: List[FileOut]
+    total: int
+
+# --- Transcripts API ---
+class TranscriptCreateIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    meeting_id: int = Field(..., ge=1)
+    file_id: int = Field(..., ge=1)
+
+class TranscriptCreateOut(BaseModel):
+    transcript_id: int
+    status: str = "processing"

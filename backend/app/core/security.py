@@ -1,14 +1,18 @@
+from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+from typing import Any
 import jwt
-from passlib.hash import bcrypt
-from typing import Any, Optional
+from passlib.context import CryptContext
 from app.core.config import settings
 
+# Use Argon2id for password & token hashing
+_pwd_ctx = CryptContext(schemes=["argon2"], deprecated="auto")
+
 def hash_password(plain: str) -> str:
-    return bcrypt.hash(plain)
+    return _pwd_ctx.hash(plain)
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.verify(plain, hashed)
+    return _pwd_ctx.verify(plain, hashed)
 
 def _encode(payload: dict, ttl: timedelta) -> str:
     now = datetime.now(timezone.utc)
@@ -17,11 +21,7 @@ def _encode(payload: dict, ttl: timedelta) -> str:
 
 def create_access_token(user_id: int, role: str) -> str:
     return _encode({"sub": str(user_id), "role": role, "typ": "access"},
-                   timedelta(minutes=settings.access_ttl_minutes))
-
-def create_refresh_token(user_id: int, role: str) -> str:
-    return _encode({"sub": str(user_id), "role": role, "typ": "refresh"},
-                   timedelta(days=settings.refresh_ttl_days))
+                   timedelta(minutes=getattr(settings, 'access_ttl_minutes', 15)))
 
 def decode_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algo])

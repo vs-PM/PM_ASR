@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { StatusBadge } from '@/components/health/StatusBadge';
@@ -7,7 +9,6 @@ import { CheckCard } from '@/components/health/CheckCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Activity, Database, Cpu, HardDrive, Network, TimerReset } from 'lucide-react';
-import { useMemo, useState } from 'react';
 
 type HealthResp = {
   status: 'ok' | 'degraded' | string;
@@ -22,51 +23,60 @@ type HealthResp = {
 };
 
 function fmtUptime(sec?: number) {
-  if (!sec && sec !== 0) return '-';
+  if (sec === undefined || sec === null) return '-';
   const s = Math.floor(sec);
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   const ss = s % 60;
-  return [
-    d ? `${d}д` : null,
-    h ? `${h}ч` : null,
-    m ? `${m}м` : null,
-    `${ss}с`,
-  ].filter(Boolean).join(' ');
+  return [d ? `${d}д` : null, h ? `${h}ч` : null, m ? `${m}м` : null, `${ss}с`]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export default function PingPage() {
   const [auto, setAuto] = useState(true);
+  
+  const router = useRouter();
 
   const q = useQuery({
     queryKey: ['healthz'],
     queryFn: () => api<HealthResp>('/api/v1/healthz'),
-    refetchInterval: auto ? 5000 : false, // автообновление раз в 5с
+    refetchInterval: auto ? 5000 : false,
+    retry: false,                         // не зацикливать 401
+    refetchOnWindowFocus: false,
+    staleTime: 0,
   });
 
-  const startedAt = useMemo(() => {
+  useEffect(() => {
+    if (q.isError) router.replace('/login');
+  }, [q.isError, router]);
+
+    const startedAt = useMemo(() => {
     try {
       return new Intl.DateTimeFormat('ru-RU', {
-        dateStyle: 'medium', timeStyle: 'medium'
+        dateStyle: 'medium',
+        timeStyle: 'medium',
       }).format(new Date(q.data?.time.started_at ?? ''));
-    } catch { return q.data?.time.started_at || '-'; }
+    } catch {
+      return q.data?.time.started_at || '-';
+    }
   }, [q.data?.time.started_at]);
 
   const lastUpdated = useMemo(() => {
     if (!q.dataUpdatedAt) return '-';
-    return new Intl.DateTimeFormat('ru-RU', {
-      timeStyle: 'medium'
-    }).format(new Date(q.dataUpdatedAt));
+    return new Intl.DateTimeFormat('ru-RU', { timeStyle: 'medium' }).format(
+      new Date(q.dataUpdatedAt),
+    );
   }, [q.dataUpdatedAt]);
 
   const cudaLine = useMemo(() => {
     const c = q.data?.checks.cuda;
     if (!c) return '-';
     if (c.error) return `error: ${c.error}`;
-    const parts = [];
+    const parts: string[] = [];
     parts.push(c.available ? 'GPU: да' : 'GPU: нет');
-    if (c.cuda)  parts.push(`CUDA ${c.cuda}`);
+    if (c.cuda) parts.push(`CUDA ${c.cuda}`);
     if (c.cudnn) parts.push(`cuDNN ${c.cudnn}`);
     return parts.join(' · ');
   }, [q.data?.checks.cuda]);
@@ -104,9 +114,15 @@ export default function PingPage() {
             <CardTitle className="text-base">Система</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <div><span className="text-gray-500">Python:</span> {q.data?.system.python || '-'}</div>
-            <div><span className="text-gray-500">Платформа:</span> {q.data?.system.platform || '-'}</div>
-            <div><span className="text-gray-500">Устройство:</span> {q.data?.system.device || '-'}</div>
+            <div>
+              <span className="text-gray-500">Python:</span> {q.data?.system.python || '-'}
+            </div>
+            <div>
+              <span className="text-gray-500">Платформа:</span> {q.data?.system.platform || '-'}
+            </div>
+            <div>
+              <span className="text-gray-500">Устройство:</span> {q.data?.system.device || '-'}
+            </div>
           </CardContent>
         </Card>
 
@@ -115,8 +131,12 @@ export default function PingPage() {
             <CardTitle className="text-base">Время</CardTitle>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            <div><span className="text-gray-500">Старт:</span> {startedAt}</div>
-            <div><span className="text-gray-500">Аптайм:</span> {fmtUptime(q.data?.time.uptime_sec)}</div>
+            <div>
+              <span className="text-gray-500">Старт:</span> {startedAt}
+            </div>
+            <div>
+              <span className="text-gray-500">Аптайм:</span> {fmtUptime(q.data?.time.uptime_sec)}
+            </div>
             <div className="text-xs text-gray-500">Последнее обновление UI: {lastUpdated}</div>
           </CardContent>
         </Card>
@@ -137,9 +157,7 @@ export default function PingPage() {
           message={q.data?.checks.ollama?.msg}
           icon={<Network className="w-4 h-4 text-yellow-500" />}
         >
-          <div className="text-xs text-gray-500 break-all">
-            {q.data?.checks.ollama?.url}
-          </div>
+          <div className="text-xs text-gray-500 break-all">{q.data?.checks.ollama?.url}</div>
         </CheckCard>
 
         <CheckCard
