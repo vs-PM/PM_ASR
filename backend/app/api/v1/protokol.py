@@ -34,11 +34,6 @@ async def upload_and_run_protokol(
         log.exception("Failed to save uploaded file")
         raise HTTPException(status_code=500, detail="File save failed")
 
-    # AUDIT: загрузка файла
-    await audit_log(user.id, "upload", "transcript", transcript.id, {
-        "filename": file.filename, "meeting_id": meeting_id, "seg": seg
-    })
-
     # 2) создаём запись транскрипта
     transcript = MfgTranscript(
         filename=file.filename,
@@ -49,6 +44,11 @@ async def upload_and_run_protokol(
     session.add(transcript)
     await session.commit()
     await session.refresh(transcript)
+
+    # AUDIT: загрузка файла
+    await audit_log(user.id, "upload", "transcript", transcript.id, {
+        "filename": file.filename, "meeting_id": meeting_id, "seg": seg
+    })
 
     # 3) запускаем комбинированный пайплайн в фоне
     # Язык/формат можно будет параметризовать, пока фиксируем RU+JSON.
