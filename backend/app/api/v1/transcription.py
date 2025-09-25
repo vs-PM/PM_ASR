@@ -1,12 +1,12 @@
-import os
-from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query, Depends
-from app.schemas.api import RecognizeResponse
-from app.services.jobs.api import process_transcription
-from app.db.session import async_session, get_session
-from app.db.models import MfgTranscript
-from app.core.logger import get_logger
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.schemas.api import RecognizeResponse, RecognizeRequest
+from app.services.jobs.api import process_transcription
+from app.db.session import get_session
+from app.db.models import MfgTranscript, MfgFile
+from app.core.logger import get_logger
 from app.core.auth import require_user
 from app.services.audit import audit_log
 
@@ -17,50 +17,60 @@ router = APIRouter()
 @router.post("/", response_model=RecognizeResponse)
 async def upload_transcription(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    meeting_id: int = Query(...),
+    data: RecognizeRequest,
     session: AsyncSession = Depends(get_session),
     user = Depends(require_user),
 ):
-    tmp_dir = Path("/tmp")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    tmp_path = tmp_dir / file.filename
+    result = await session.execute(
+        select(MfgFile).where(MfgFile.id == data.file_id, MfgFile.user_id == user.id)
+    )
+    mfg_file = result.scalar_one_or_none()
+    if not mfg_file:
+        raise HTTPException(status_code=404, detail="File not found")
 
-    try:
-        # Сохраняем файл
-        content = await file.read()
-        tmp_path.write_bytes(content)
-        log.info(f"Файл '{file.filename}' загружен и сохранен во временную директорию: {tmp_path}")
-    except Exception:
-        log.exception("Ошибка при сохранении загруженного файла")
-        raise HTTPException(status_code=500, detail="Не удалось сохранить файл")
-
-    # Создаём запись в БД
     transcript = MfgTranscript(
-        filename=file.filename,
+        filename=mfg_file.filename,
         status="processing",
-        meeting_id=meeting_id,
-        file_path=str(tmp_path)
+        meeting_id=data.meeting_id,
+        file_path=mfg_file.stored_path,
+        file_id=mfg_file.id,
+        user_id=user.id,
     )
     session.add(transcript)
     await session.commit()
     await session.refresh(transcript)
-    await audit_log(user.id, "upload", "transcript", transcript.id, {
-        "filename": file.filename
-    })
-    log.info(f"Создана запись транскрипта id={transcript.id}, meeting_id={meeting_id}, статус={transcript.status}")
+    await audit_log(
+        user.id,
+        "upload",
+        "transcript",
+        transcript.id,
+        {
+            "filename": mfg_file.filename,
+            "file_id": mfg_file.id,
+            "meeting_id": data.meeting_id,
+        },
+    )
+    log.info(
+        "Создана запись транскрипта id=%s, meeting_id=%s, статус=%s",
+        transcript.id,
+        data.meeting_id,
+        transcript.status,
+    )
 
-    # Фоновая задача
-    background_tasks.add_task(process_transcription, transcript.id, str(tmp_path))
-    log.info(f"Фоновая задача транскрипции добавлена для transcript_id={transcript.id}")
-    await audit_log(user.id, "start_step", "transcript", transcript.id, {
-        "step": "transcription"
-    })
+    background_tasks.add_task(process_transcription, transcript.id, mfg_file.stored_path)
+    log.info("Фоновая задача транскрипции добавлена для transcript_id=%s", transcript.id)
+    await audit_log(
+        user.id,
+        "start_step",
+        "transcript",
+        transcript.id,
+        {"step": "transcription"},
+    )
 
     return RecognizeResponse(
         transcript_id=transcript.id,
-        filename=file.filename,
-        status="processing"
+        filename=mfg_file.filename,
+        status="processing",
     )
 
 
@@ -68,12 +78,12 @@ async def upload_transcription(
 async def get_transcript(transcript_id: int, session: AsyncSession = Depends(get_session)):
     transcript = await session.get(MfgTranscript, transcript_id)
     if not transcript:
-        log.warning(f"Попытка получить несуществующий transcript_id={transcript_id}")
+        log.warning("Попытка получить несуществующий transcript_id=%s", transcript_id)
         raise HTTPException(status_code=404, detail="Транскрипт не найден")
-    log.info(f"Получена запись транскрипта id={transcript.id}, статус={transcript.status}")
+    log.info("Получена запись транскрипта id=%s, статус=%s", transcript.id, transcript.status)
     return {
         "id": transcript.id,
         "status": transcript.status,
         "processed_text": transcript.processed_text,
-        "raw_text": transcript.raw_text
+        "raw_text": transcript.raw_text,
     }

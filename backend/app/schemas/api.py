@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 
 # -----------------------------
@@ -19,6 +19,11 @@ class ChunkInfo(BaseModel):
 # -----------------------------
 # /transcription
 # -----------------------------
+class RecognizeRequest(BaseModel):
+    file_id: int = Field(..., ge=1)
+    meeting_id: int = Field(..., ge=1)
+
+
 class RecognizeResponse(BaseModel):
     transcript_id: int
     status: str
@@ -27,6 +32,11 @@ class RecognizeResponse(BaseModel):
 # -----------------------------
 # /diarization
 # -----------------------------
+class DiarizationRequest(BaseModel):
+    file_id: int = Field(..., ge=1)
+    meeting_id: int = Field(..., ge=1)
+
+
 class DiarizationResponse(BaseModel):
     transcript_id: int
     status: str
@@ -85,6 +95,12 @@ class ProtokolResponse(BaseModel):
     transcript_id: int
     status: str
     filename: str
+
+
+class ProtokolRequest(BaseModel):
+    file_id: int = Field(..., ge=1)
+    meeting_id: int = Field(..., ge=1)
+    seg: Literal["diarize", "vad", "fixed"] = "diarize"
 
 # --- Files API ---
 class FileOut(BaseModel):
