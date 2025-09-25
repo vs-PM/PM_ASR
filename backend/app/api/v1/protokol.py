@@ -28,6 +28,14 @@ async def upload_and_run_protokol(
     if not mfg_file:
         raise HTTPException(status_code=404, detail="File not found")
 
+    try:
+        tmp_path.write_bytes(await file.read())
+        log.info("Saved upload to %s", tmp_path)
+    except Exception:
+        log.exception("Failed to save uploaded file")
+        raise HTTPException(status_code=500, detail="File save failed")
+
+    # 2) создаём запись транскрипта
     transcript = MfgTranscript(
         filename=mfg_file.filename,
         status="processing",
