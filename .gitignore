@@ -20,6 +20,7 @@ venv/
 .venv/
 backend.venv/
 backend/.venv/
+*.venv/
 vvs-non/
 
 # 2️⃣  IDE / Editor artefacts

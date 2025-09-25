@@ -1,0 +1,47 @@
+# ==== Core ML stack ====
+torch==2.2.0+cu121
+torchaudio==2.2.0+cu121
+torchvision==0.17.0+cu121
+numpy<2  # важно: PyTorch + Whisper не поддерживают NumPy 2.x
+
+# ==== Whisper / ASR ====
+faster-whisper==1.0.1
+speechbrain==1.0.3
+
+# ==== Diarization / Speaker tasks ====
+pyannote.audio==3.1.1
+
+# ==== Web API ====
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+PyJWT==2.9.0
+passlib[argon2]==1.7.4
+argon2-cffi==23.1.0
+
+# ==== Database ====
+sqlalchemy==2.0.0
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+pgvector==0.4.1
+
+# ==== Utils / Config ====
+pydantic==2.11.7
+pydantic-settings==2.10.1
+python-dotenv==1.1.1
+
+# ==== Logging / Monitoring ====
+coloredlogs==15.0.1
+colorlog==6.9.0
+
+# ==== Data science helpers (optional but useful) ====
+pandas==2.3.2
+scikit-learn==1.7.1
+scipy==1.16.1
+
+# ==== HuggingFace (models, tokenizers) ====
+transformers==4.38.2
+huggingface-hub==0.34.4
+safetensors==0.6.2
+httpx==0.26.0
+webrtcvad
