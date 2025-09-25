@@ -18,6 +18,8 @@ sdist/
 *.log
 venv/
 .venv/
+backend.venv/
+backend/.venv/
 vvs-non/
 
 # 2️⃣  IDE / Editor artefacts
@@ -77,3 +79,23 @@ yarn-error.log
 !app.py
 !*.py
 !*.txt
+
+# Build / cache
+dist/
+build/
+.mypy_cache/
+.pytype/
+.pytest_cache/
+
+# --- Node / Next.js ---
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+frontend/.vercel/
+frontend/.cache/
+
+# --- App data / uploads (оставим .gitkeep) ---
+data/
+uploads/
+!data/.gitkeep
+!uploads/.gitkeep
