@@ -4,6 +4,7 @@ from pathlib import Path
 import uuid, os
 from datetime import datetime
 
+from fastapi.responses import FileResponse
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from sqlalchemy import select, func
 from app.core.auth import require_user
@@ -91,3 +92,38 @@ async def get_file(file_id: int, user=Depends(require_user)):
             "id": r.id, "filename": r.filename, "size_bytes": r.size_bytes,
             "mimetype": r.mimetype, "created_at": r.created_at
         }
+
+
+@router.get("/{file_id}/raw")
+async def file_raw(file_id: int, user=Depends(require_user)):
+    """
+    Отдаёт сам аудиофайл. Требует авторизацию.
+    Ответ: 200 OK (или 206 Partial Content при Range-запросе).
+    Content-Disposition: inline; filename="<оригинальное имя>"
+    """
+    async with async_session() as s:
+        r = (await s.execute(
+            select(MfgFile).where(MfgFile.id == file_id, MfgFile.user_id == user.id)
+        )).scalar_one_or_none()
+        if not r:
+            raise HTTPException(404, "File not found")
+
+        # путь до сохранённого файла:
+        # замените 'r.stored' на фактическое поле с относительным путём/именем хранения
+        # пример: stored = "2025/09/25/uuid_original.wav"
+        # в upload коде вы как раз формировали такое имя.
+        stored_rel = getattr(r, "stored", None) or getattr(r, "stored_path", None)
+        if not stored_rel:
+            raise HTTPException(500, "Stored path is not set")
+
+        file_path = Path(settings.upload_dir) / stored_rel
+        if not file_path.is_file():
+            raise HTTPException(404, "File content not found")
+
+        # inline-отдача; FileResponse в Starlette поддерживает Range из коробки
+        return FileResponse(
+            path=file_path,
+            media_type=r.mimetype or "application/octet-stream",
+            filename=r.filename,  # оригинальное имя в заголовках
+            headers={"Content-Disposition": f'inline; filename="{r.filename}"'}
+        )

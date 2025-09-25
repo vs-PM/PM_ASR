@@ -22,6 +22,8 @@ backend.venv/
 backend/.venv/
 *.venv/
 vvs-non/
+uploads
+
 
 # 2️⃣  IDE / Editor artefacts
 # --------------------------------------------------

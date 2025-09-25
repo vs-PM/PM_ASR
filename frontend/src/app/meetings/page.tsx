@@ -1,88 +1,98 @@
+// src/app/meetings/page.tsx
 'use client';
-import { useQuery } from '@tanstack/react-query';
+
+import * as React from 'react';
 import Link from 'next/link';
-import { api } from '@/lib/api';
-
-type MeetingRow = {
-  id: number | string;
-  title?: string | null;
-  audio_file_name?: string | null;
-  audio_file_id?: number | string | null;
-  status?: string | null;
-  progress?: number | null;
-  updated_at?: string | null;
-};
-
-type MeetingsList = { items: MeetingRow[] };
+import CreateMeetingDialog from '@/components/meetings/CreateMeetingDialog';
+import { useMeetings, MEETINGS_PAGE_SIZE, useInvalidateMeetings } from '@/lib/meetings';
+import { formatDate } from '@/lib/files';
 
 export default function MeetingsPage() {
-  const { data, isLoading, error, refetch } = useQuery<MeetingsList>({
-  queryKey: ['meetings'],
-  queryFn: () => api<MeetingsList>('meetings'),
-  refetchInterval: (q) =>
-    q.state.data?.items?.some((m) => m.status === 'processing') ? 1500 : false,
-  });
+  const [page, setPage] = React.useState(1);
+  const { data, isLoading, isError, error, isFetching } = useMeetings(page, MEETINGS_PAGE_SIZE);
+  const invalidate = useInvalidateMeetings();
 
+  const total = data?.total ?? 0;
+  const items = data?.items ?? [];
+  const pages = Math.max(1, Math.ceil(total / MEETINGS_PAGE_SIZE));
+
+  function go(delta: number) {
+    setPage((p) => Math.min(pages, Math.max(1, p + delta)));
+  }
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between">
+    <main className="mx-auto max-w-6xl p-6 space-y-6">
+      <header className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Митинги</h1>
         <div className="flex items-center gap-2">
-          <Link href="/meetings/new" className="px-3 py-2 border rounded-md">
-            Создать
-          </Link>
-          <button className="px-3 py-2 border rounded-md" onClick={() => refetch()}>
-            Обновить
-          </button>
+          <CreateMeetingDialog onCreated={() => invalidate(page)} />
+          <span className="text-sm text-gray-500">{isFetching ? 'Обновляем…' : null}</span>
         </div>
-      </div>
+      </header>
 
-      {isLoading && <p className="text-sm text-gray-600">Загрузка…</p>}
-      {error && <p className="text-sm text-red-600">Ошибка загрузки</p>}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">Список</h2>
+          <div className="flex items-center gap-2">
+            <button
+              className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
+              onClick={() => go(-1)}
+              disabled={page <= 1}
+            >
+              ← Назад
+            </button>
+            <span className="text-sm">Стр. {page} / {pages}</span>
+            <button
+              className="px-3 py-1 border rounded-md text-sm disabled:opacity-50"
+              onClick={() => go(1)}
+              disabled={page >= pages}
+            >
+              Вперёд →
+            </button>
+          </div>
+        </div>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left border-b">
-            <th className="py-2">Название</th>
-            <th>Файл</th>
-            <th>Статус</th>
-            <th>Прогресс</th>
-            <th>Обновлён</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data?.items?.length ? (
-            data.items.map((m) => (
-              <tr key={m.id} className="border-b">
-                <td className="py-2">
-                  <Link href={`/meetings/${m.id}`} className="underline">
-                    {m.title || `Митинг #${m.id}`}
-                  </Link>
-                </td>
-                <td>{m.audio_file_name ?? m.audio_file_id ?? '—'}</td>
-                <td>{m.status ?? '—'}</td>
-                <td>
-                  {typeof m.progress === 'number' ? (
-                    <div className="w-32 h-2 bg-gray-200 rounded">
-                      <div className="h-2 bg-black rounded" style={{ width: `${m.progress}%` }} />
-                    </div>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td>{m.updated_at ?? '—'}</td>
+        <div className="overflow-x-auto border rounded-lg">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left px-3 py-2">ID</th>
+                <th className="text-left px-3 py-2">Название</th>
+                <th className="text-left px-3 py-2">Файл</th>
+                <th className="text-left px-3 py-2">Статус</th>
+                <th className="text-left px-3 py-2">Создан</th>
+                <th className="text-left px-3 py-2">Обновлён</th>
+                <th className="text-left px-3 py-2">Действия</th>
               </tr>
-            ))
-          ) : (
-            <tr>
-              <td className="py-4 text-gray-600" colSpan={5}>
-                Нет митингов
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </section>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <tr><td className="px-3 py-4" colSpan={7}>Загружаем…</td></tr>
+              ) : isError ? (
+                <tr><td className="px-3 py-4 text-red-600" colSpan={7}>{(error as Error).message}</td></tr>
+              ) : items.length === 0 ? (
+                <tr><td className="px-3 py-4 text-gray-500" colSpan={7}>Пока пусто — создайте митинг</td></tr>
+              ) : (
+                items.map((t) => (
+                  <tr key={t.id} className="border-t">
+                    <td className="px-3 py-2 whitespace-nowrap">#{t.id}</td>
+                    <td className="px-3 py-2">{t.title ?? '—'}</td>
+                    <td className="px-3 py-2">{t.filename ?? '—'}</td>
+                    <td className="px-3 py-2">{t.status ?? '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{t.created_at ? formatDate(t.created_at) : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{t.updated_at ? formatDate(t.updated_at) : '—'}</td>
+                    <td className="px-3 py-2 space-x-2">
+                      <Link href={`/meetings/${t.id}`} className="px-2 py-1 border rounded-md text-xs hover:bg-gray-100">
+                        Открыть
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
   );
 }
