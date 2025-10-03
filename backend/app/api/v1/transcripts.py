@@ -6,11 +6,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logger import get_logger
 from app.core.auth import require_user
-from app.db.session import async_session
-from app.db.models import MfgTranscript, MfgJob, MfgFile
+from app.db.session import async_session, get_session
+from app.db.models import (
+    MfgTranscript, MfgJob, MfgFile,
+    MfgSegment, MfgSpeaker, MfgDiarization
+)
 from app.schemas.api import TranscriptCreateIn, TranscriptCreateOut
 
 log = get_logger(__name__)
@@ -169,3 +173,117 @@ async def rename_transcript(transcript_id: int, title: str, user=Depends(require
         await s.commit()
         await s.refresh(tr)
         return {"id": tr.id, "title": tr.title}
+
+
+def _serialize_item(tr: MfgTranscript, job: Optional[MfgJob]) -> Dict[str, Any]:
+    return {
+        "id": tr.id,
+        "meeting_id": getattr(tr, "meeting_id", None),
+        "title": getattr(tr, "title", None),
+        "status": getattr(tr, "status", None),
+        "filename": getattr(tr, "filename", None),
+        "file_id": getattr(tr, "file_id", None),
+        "created_at": getattr(tr, "created_at", None),
+        "updated_at": getattr(tr, "updated_at", None),
+        "job": None if job is None else {
+            "status": getattr(job, "status", None),
+            "progress": getattr(job, "progress", None),
+            "step": getattr(job, "step", None),
+            "error": getattr(job, "error", None),
+            "started_at": getattr(job, "started_at", None),
+            "finished_at": getattr(job, "finished_at", None),
+        },
+        # добавим тексты (для детального просмотра)
+        "processed_text": getattr(tr, "processed_text", None),
+        "raw_text": getattr(tr, "raw_text", None),
+    }
+
+@router.get("/by-meeting/{meeting_id}")
+async def get_transcript_by_meeting(
+    meeting_id: int,
+    user = Depends(require_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Вернуть по meeting_id:
+      - один (последний) транскрипт пользователя,
+      - job-статус,
+      - сегменты,
+      - спикеров,
+      - интервалы диаризации (если есть).
+    """
+    # последний по meeting_id (на случай нескольких прогонов)
+    q = (
+        select(MfgTranscript, MfgJob)
+        .join(MfgJob, MfgJob.transcript_id == MfgTranscript.id, isouter=True)
+        .where(MfgTranscript.user_id == user.id, MfgTranscript.meeting_id == meeting_id)
+        .order_by(MfgTranscript.created_at.desc())
+        .limit(1)
+    )
+    row = (await session.execute(q)).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Transcript not found for meeting")
+
+    tr, job = row
+    base = _serialize_item(tr, job)
+
+    # Сегменты
+    seg_rows = (await session.execute(
+        select(MfgSegment)
+        .where(MfgSegment.transcript_id == tr.id)
+        .order_by(MfgSegment.start_ts.asc(), MfgSegment.end_ts.asc())
+    )).scalars().all()
+
+    segments = [
+        {
+            "id": s.id,
+            "start_ts": float(s.start_ts) if s.start_ts is not None else None,
+            "end_ts": float(s.end_ts) if s.end_ts is not None else None,
+            "text": s.text or "",
+            "speaker": s.speaker,
+            "lang": s.lang,
+        }
+        for s in seg_rows
+    ]
+
+    # Спикеры (справочник)
+    spk_rows = (await session.execute(
+        select(MfgSpeaker)
+        .where(MfgSpeaker.transcript_id == tr.id)
+        .order_by(MfgSpeaker.speaker.asc())
+    )).scalars().all()
+
+    speakers = [
+        {
+            "id": sp.id,
+            "speaker": sp.speaker,
+            "display_name": sp.display_name,
+            "color": sp.color,
+            "is_active": sp.is_active,
+        }
+        for sp in spk_rows
+    ]
+
+    # Диаризация (опционально)
+    diar_rows = (await session.execute(
+        select(MfgDiarization)
+        .where(MfgDiarization.transcript_id == tr.id)
+        .order_by(MfgDiarization.start_ts.asc())
+    )).scalars().all()
+
+    diarization = [
+        {
+            "id": d.id,
+            "start_ts": float(d.start_ts) if d.start_ts is not None else None,
+            "end_ts": float(d.end_ts) if d.end_ts is not None else None,
+            "speaker": d.speaker,
+        }
+        for d in diar_rows
+    ]
+
+    return {
+        **base,
+        "segments": segments,
+        "speakers": speakers,
+        "diarization": diarization,
+    }

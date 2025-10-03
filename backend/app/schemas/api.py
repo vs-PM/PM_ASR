@@ -59,7 +59,7 @@ class EmbeddingsResponse(BaseModel):
 
 
 # -----------------------------
-# /summary (Вариант B)
+# /summary 
 # -----------------------------
 class SummaryStartResponse(BaseModel):
     transcript_id: int
@@ -123,3 +123,25 @@ class TranscriptCreateIn(BaseModel):
 class TranscriptCreateOut(BaseModel):
     transcript_id: int
     status: str = "processing"
+
+# ---------- mitings ----------
+class MeetingCreateIn(BaseModel):
+    file_id: int = Field(..., ge=1)
+    meeting_id: int = Field(..., ge=1)
+    title: str | None = None
+
+class MeetingCreateOut(BaseModel):
+    id: int
+    status: str = "queued"
+
+class MeetingGetOut(BaseModel):
+    id: int
+    meeting_id: int
+    file_id: int | None = None
+    filename: str | None = None
+    title: str | None = None
+    status: str
+    error: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    text: str | None = None
