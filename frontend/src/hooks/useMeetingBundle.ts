@@ -1,123 +1,117 @@
 import * as React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMeeting } from '@/lib/meetings';
 import {
   SegmentMode,
+  ALL_MODES,
+  useAllModesState,
   useStartSegmentationV2,
-  useSegmentationState,
   useStartTranscriptionFromSegments,
-  useSegments,
   useV2Result,
 } from '@/lib/segmentation';
 
-/** Единый агрегирующий хук для страницы митинга */
 export function useMeetingBundle(meetingId: number) {
-  // данные
+  const qc = useQueryClient();
+
+  // активный режим
+  const [mode, setMode] = React.useState<SegmentMode>('diarize');
+
+  // Деталь митинга (старый источник)
   const meeting = useMeeting(meetingId);
-  const segState = useSegmentationState(meetingId);
-  const v2 = useV2Result(meetingId);
-  const segments = useSegments(meetingId); // fallback, если v2.segments нет
+  const transcriptId = meeting.data?.id ?? meetingId;
 
-  // мутации
-  const doSegment = useStartSegmentationV2();
-  const doTranscribe = useStartTranscriptionFromSegments();
+  // Состояние ВСЕХ режимов (разом; без поллинга/мигания)
+  const modesState = useAllModesState(transcriptId);
 
-  // локальная блокировка кнопки «Нарезать», чтобы не было двойного старта
-  const [cutLocked, setCutLocked] = React.useState(false);
-  const [seenProcessing, setSeenProcessing] = React.useState(false);
+  // Результат по выбранному режиму
+  const v2 = useV2Result(transcriptId, mode);
 
-  const statusV2 = v2.data?.status;
-  const statusMeeting = meeting.data?.status ?? meeting.data?.job?.status;
-  const status: string = statusV2 ?? statusMeeting ?? '—';
+  // Найти данные по текущему режиму
+  const current = React.useMemo(() => {
+    const arr = modesState.data ?? [];
+    return arr.find((x) => x.mode === mode) ?? { mode, status: 'queued', chunks: 0 };
+  }, [modesState.data, mode]);
 
-  const chunks =
-    typeof segState.data?.chunks === 'number'
-      ? segState.data.chunks
-      : (v2.data?.diarization?.length ?? 0);
+  const chunks = current.chunks;
+  const segStatus = current.status;
+  const cutting = segStatus === 'processing';
 
-  React.useEffect(() => {
-    if (segState.data?.status === 'processing' || status === 'processing') {
-      setSeenProcessing(true);
-    }
-  }, [segState.data?.status, status]);
+  // локальный флаг «только что транскрибировали» — чтобы выключить кнопку до ручного refresh
+  const [justTranscribedByMode, setJustTranscribedByMode] = React.useState<Record<SegmentMode, boolean>>({
+    diarize: false, vad: false, fixed: false, full: false,
+  });
 
-  // один общий рефетч (стабильная ссылка, удовлетворяет eslint)
-  const refetchAll = React.useCallback(() => {
-    void meeting.refetch();
-    void v2.refetch();
-    void segState.refetch();
-    void segments.refetch();
-  }, [meeting.refetch, v2.refetch, segState.refetch, segments.refetch]);
+  const hasResult =
+    (v2.data?.segments && v2.data.segments.length > 0) ||
+    Boolean((v2.data?.text ?? '').trim());
 
-  React.useEffect(() => {
-    // Когда закончили processing — снимем лок, подтянем данные
-    if (seenProcessing && status !== 'processing') {
-      setCutLocked(false);
-      refetchAll();
-    }
-  }, [seenProcessing, status, refetchAll]);
+  const startSeg = useStartSegmentationV2();
+  const startAsr = useStartTranscriptionFromSegments();
 
-  const startCut = React.useCallback(
-    async (mode: SegmentMode) => {
-      const fileId = meeting.data?.file_id;
-      if (!fileId) return;
-      setCutLocked(true);
-      try {
-        await doSegment.mutateAsync({
-          id: meetingId,
-          file_id: fileId,
-          meeting_id: fileId, // совместимость
-          mode,
-        });
-        refetchAll(); // мгновенный рефетч, чтобы UI ожил быстро
-      } catch {
-        setCutLocked(false);
-      }
-    },
-    [doSegment, meeting.data?.file_id, meetingId, refetchAll],
-  );
+  const canCut = !cutting && chunks === 0;
+  const canTranscribe =
+    chunks > 0 &&
+    !cutting &&
+    !hasResult &&
+    !startAsr.isPending &&
+    !justTranscribedByMode[mode];
 
-  const startTranscribe = React.useCallback(async () => {
-    await doTranscribe.mutateAsync({ transcript_id: meetingId });
-    refetchAll();
-  }, [doTranscribe, meetingId, refetchAll]);
+  async function startCut() {
+    const fileId = meeting.data?.file_id;
+    if (!fileId || !transcriptId) return;
+    await startSeg.mutateAsync({ id: transcriptId, file_id: fileId, mode });
+  }
 
-  const cuttingNow: boolean = Boolean(
-    doSegment.isPending ||
-    cutLocked ||
-    segState.data?.status === 'processing' ||
-    status === 'processing'
-  );
+  async function startTranscribe() {
+    if (!transcriptId) return;
+    await startAsr.mutateAsync({ transcript_id: transcriptId, mode });
+    setJustTranscribedByMode((m) => ({ ...m, [mode]: true }));
+  }
 
-  const canCut: boolean = Boolean(meeting.data?.file_id) &&
-    !doSegment.isPending &&
-    !cutLocked &&
-    status !== 'transcription_processing' &&
-    segState.data?.status !== 'processing';
+  // Ручное обновление по кнопке (ws позже)
+  async function refresh() {
+    if (!transcriptId) return;
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['segmentation-summary', transcriptId] }),
+      qc.invalidateQueries({ queryKey: ['v2-result', transcriptId, mode] }),
+      qc.invalidateQueries({ queryKey: ['meeting'] }),
+    ]);
+    setJustTranscribedByMode({ diarize: false, vad: false, fixed: false, full: false });
+  }
 
-  const hasChunks: boolean =
-    segState.data?.status === 'diarization_done' ||
-    ((v2.data?.diarization?.length ?? 0) > 0);
+  // Summary — для панели статусов (все режимы сразу)
+  const summary = React.useMemo(() => {
+    const arr = modesState.data ?? ALL_MODES.map((m) => ({ mode: m, status: 'queued', chunks: 0 }));
+    return {
+      data: arr,
+      isLoading: modesState.isLoading,
+      isError: modesState.isError,
+    };
+  }, [modesState.data, modesState.isLoading, modesState.isError]);
 
-  const canTranscribe: boolean = Boolean(
-    hasChunks &&
-    !doTranscribe.isPending &&
-    status !== 'transcription_processing'
-  );
+  const globalStatus = meeting.data?.status ?? 'queued';
 
   return {
+    // UI
+    mode, setMode,
+
+    // данные
     meeting,
-    segState,
     v2,
-    segments,
-    status,
+    summary,
+
+    // производные
     chunks,
-    cutLocked,
-    cuttingNow,
+    segStatus,
+    cuttingNow: cutting || startSeg.isPending,
+    transcribingNow: startAsr.isPending,
     canCut,
     canTranscribe,
+    globalStatus,
+
+    // действия
     startCut,
     startTranscribe,
-    isCutPending: doSegment.isPending,
-    isTranscribePending: doTranscribe.isPending,
+    refresh,
   };
 }

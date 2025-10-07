@@ -1,21 +1,20 @@
-# app/api/v2/segment.py
-from __future__ import annotations
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select, func, asc
+from sqlalchemy import select, func, asc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import require_user
 from app.core.logger import get_logger
 from app.db.session import get_session, async_session
 from app.db.models import MfgTranscript, MfgFile, MfgDiarization, MfgSpeaker, MfgSegment
-from app.schemas.v2 import SegmentStartIn, SegmentStartOut, SegmentStateOut, TranscriptionStartOut
+from app.schemas.v2 import SegmentStartIn, SegmentStartOut, SegmentStateOut, TranscriptionStartOut, SegmentMode
 from app.schemas.v2 import TranscriptV2Result, SpeakerItem as SP, DiarItem as DI, SegmentTextItem as STI
 from app.services.jobs.api import process_diarization, process_segmentation, process_pipeline
+from app.services.jobs.steps import pipeline as pipeline_step
 
 log = get_logger(__name__)
 router = APIRouter()
 
-async def _run_full_segmentation(transcript_id: int, audio_path: str, file_id: int) -> int:
+async def _run_full_segmentation(transcript_id: int, audio_path: str, file_id: int, mode: str) -> int:
     import torchaudio
     try:
         info = torchaudio.info(audio_path)
@@ -25,7 +24,7 @@ async def _run_full_segmentation(transcript_id: int, audio_path: str, file_id: i
         dur = 0.0
     async with async_session() as s:
         s.add(MfgDiarization(
-            transcript_id=transcript_id, speaker="SPEECH",
+            transcript_id=transcript_id, mode=mode, speaker="SPEECH",
             start_ts=0.0, end_ts=dur, file_path=audio_path,
         ))
         tr = await s.get(MfgTranscript, transcript_id)
@@ -35,32 +34,54 @@ async def _run_full_segmentation(transcript_id: int, audio_path: str, file_id: i
         await s.commit()
     return 1
 
-async def _wrap_segmentation_and_mark_done(mode: str, transcript_id: int, audio_path: str, file_id: int) -> None:
+async def _wrap_segmentation_and_mark_done(mode: str, transcript_id: int) -> None:
+    """
+    Фоновая нарезка для выбранного режима. По завершении → status='diarization_done'.
+    """
     try:
+        # 1) Вытащим путь: сначала из MfgTranscript.file_path, если пусто — из MfgFile.stored_path
+        async with async_session() as s:
+            tr = await s.get(MfgTranscript, transcript_id)
+            if not tr:
+                raise RuntimeError(f"Transcript {transcript_id} not found")
+
+            audio_path = getattr(tr, "file_path", None)
+            if not audio_path and getattr(tr, "file_id", None):
+                f = await s.get(MfgFile, tr.file_id)
+                if f and getattr(f, "stored_path", None):
+                    audio_path = f.stored_path
+
+        if not audio_path:
+            raise RuntimeError("Audio file path is not set")
+
+        # 2) Запустим нужный шаг
         if mode == "diarize":
-            chunks = await process_diarization(transcript_id, audio_path)
-        elif mode in ("vad", "fixed"):
-            chunks = await process_segmentation(transcript_id, audio_path, mode)
-        elif mode == "full":
-            chunks = await _run_full_segmentation(transcript_id, audio_path, file_id)
+            from app.services.jobs.steps import diarization as diar_step
+            chunks = await diar_step.run(transcript_id, audio_path)
         else:
-            log.error("Unknown mode: %s", mode)
-            chunks = 0
+            from app.services.jobs.steps import segmentation as seg_step
+            chunks = await seg_step.run(transcript_id, audio_path, mode=mode)
+
+        log.info("Segmentation done: tid=%s mode=%s chunks=%s", transcript_id, mode, chunks)
+
+        # 3) Поставим статус
         async with async_session() as s:
             tr = await s.get(MfgTranscript, transcript_id)
             if tr:
                 tr.status = "diarization_done"
                 s.add(tr)
                 await s.commit()
-        log.info("Segmentation(%s) done: tid=%s chunks=%s", mode, transcript_id, chunks)
+
     except Exception:
-        log.exception("Segmentation(%s) failed: tid=%s", mode, transcript_id)
+        log.exception("Segmentation failed: tid=%s mode=%s", transcript_id, mode)
         async with async_session() as s:
             tr = await s.get(MfgTranscript, transcript_id)
             if tr:
                 tr.status = "error"
                 s.add(tr)
                 await s.commit()
+
+
 
 @router.post("")  # /api/v2/segment (без завершающего слэша)
 async def start_segmentation(
@@ -83,13 +104,16 @@ async def start_segmentation(
     if not f:
         raise HTTPException(status_code=404, detail="file not found")
 
-    # 2) привязки: file_id/filename, meeting_id := file_id (как договорились)
+    # 2) привязки: file_id/filename, meeting_id := file_id
     changed = False
     if tr.file_id != f.id:
         tr.file_id = f.id
         changed = True
-    if not tr.filename:
-        tr.filename = f.filename
+    if not tr.filename and getattr(f, "original_name", None):
+        tr.filename = f.original_name
+        changed = True
+    if not getattr(tr, "file_path", None) and getattr(f, "stored_path", None):
+        tr.file_path = f.stored_path
         changed = True
     if tr.meeting_id != f.id:
         tr.meeting_id = f.id   # пишем meeting_id=file_id
@@ -97,15 +121,37 @@ async def start_segmentation(
     if changed:
         session.add(tr)
         await session.commit()
+    
+     # 3) если уже есть чанки для этого режима
+    existing = (await session.execute(
+        select(func.count(MfgDiarization.id))
+        .where(MfgDiarization.transcript_id == tr.id, MfgDiarization.mode == data.mode)
+    )).scalar_one() or 0
 
-    # 3) фоновая нарезка
-    background_tasks.add_task(_wrap_segmentation_and_mark_done, data.mode, tr.id, f.stored_path, f.id)
+    if existing > 0 and not data.overwrite:
+        # мягкий отказ с подсказкой
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "already_segmented", "mode": data.mode, "chunks": int(existing)}
+        )
+
+    if existing > 0 and data.overwrite:
+        # чистим старые нарезки в этом режиме
+        await session.execute(
+            delete(MfgDiarization)
+            .where(MfgDiarization.transcript_id == tr.id, MfgDiarization.mode == data.mode)
+        )
+        await session.commit()
+
+    # 4) фоновая нарезка
+    background_tasks.add_task(_wrap_segmentation_and_mark_done, data.mode, tr.id)
 
     return SegmentStartOut(transcript_id=tr.id, status="processing", mode=data.mode)
 
 @router.get("/{transcript_id}")
 async def get_segmentation_state(
     transcript_id: int,
+    mode: SegmentMode = "diarize",
     session: AsyncSession = Depends(get_session),
     user = Depends(require_user),
 ) -> SegmentStateOut:
@@ -113,11 +159,10 @@ async def get_segmentation_state(
     if not tr or tr.user_id != user.id:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
-    total = (
-        await session.execute(
-            select(func.count(MfgDiarization.id)).where(MfgDiarization.transcript_id == transcript_id)
-        )
-    ).scalar_one() or 0
+    total = (await session.execute(
+        select(func.count(MfgDiarization.id))
+        .where(MfgDiarization.transcript_id == transcript_id, MfgDiarization.mode == mode)
+    )).scalar_one() or 0
 
     return SegmentStateOut(transcript_id=transcript_id, status=tr.status, chunks=int(total))
 
@@ -125,6 +170,7 @@ async def get_segmentation_state(
 async def start_transcription_from_segments(
     transcript_id: int,
     background_tasks: BackgroundTasks,
+    mode: SegmentMode = "diarize",
     session: AsyncSession = Depends(get_session),
     user = Depends(require_user),
 ) -> TranscriptionStartOut:
@@ -132,16 +178,24 @@ async def start_transcription_from_segments(
     if not tr or tr.user_id != user.id:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
-    background_tasks.add_task(process_pipeline, transcript_id)
+    # Можно валидировать наличие чанков в этом режиме
+    exists = (await session.execute(
+        select(func.count(MfgDiarization.id))
+        .where(MfgDiarization.transcript_id == transcript_id, MfgDiarization.mode == mode)
+    )).scalar_one() or 0
+    if exists == 0:
+        raise HTTPException(status_code=400, detail=f"No segments for mode={mode}")
+
+    background_tasks.add_task(pipeline_step.run, transcript_id, "ru", mode)
     tr.status = "transcription_processing"
-    session.add(tr)
-    await session.commit()
+    session.add(tr); await session.commit()
     return TranscriptionStartOut(transcript_id=transcript_id, status="transcription_processing")
 
 
 @router.get("/{transcript_id}/result")
 async def get_full_result(
     transcript_id: int,
+    mode: SegmentMode = "diarize",
     session: AsyncSession = Depends(get_session),
     user = Depends(require_user),
 ) -> TranscriptV2Result:
@@ -151,13 +205,11 @@ async def get_full_result(
         raise HTTPException(status_code=404, detail="Transcript not found")
 
     # 2) диаризация
-    diar_rows = (
-        await session.execute(
-            select(MfgDiarization)
-            .where(MfgDiarization.transcript_id == transcript_id)
-            .order_by(asc(MfgDiarization.start_ts))
-        )
-    ).scalars().all()
+    diar_rows = (await session.execute(
+        select(MfgDiarization)
+        .where(MfgDiarization.transcript_id == transcript_id, MfgDiarization.mode == mode)
+        .order_by(asc(MfgDiarization.start_ts))
+    )).scalars().all()
     diar = [
         DI(id=row.id, start_ts=row.start_ts, end_ts=row.end_ts, speaker=getattr(row, "speaker", None))
         for row in diar_rows
@@ -186,7 +238,10 @@ async def get_full_result(
     seg_rows = (
         await session.execute(
             select(MfgSegment)
-            .where(MfgSegment.transcript_id == transcript_id)
+            .where(
+                MfgSegment.transcript_id == transcript_id,
+                MfgSegment.mode == mode,
+            )
             .order_by(asc(MfgSegment.start_ts))
         )
     ).scalars().all()

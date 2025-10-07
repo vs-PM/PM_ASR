@@ -18,6 +18,7 @@ async def run(transcript_id: int, audio_path: str) -> int:
                 start_ts=c["start_ts"],
                 end_ts=c["end_ts"],
                 file_path=c["file_path"],
+                mode="diarize",
             ) for c in chunks
         ])
         stmt = stmt.on_conflict_do_nothing(

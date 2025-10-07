@@ -1,149 +1,243 @@
-// src/lib/segmentation.ts
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
-export type SegmentMode = 'full' | 'vad' | 'fixed' | 'diarize';
+/* ==============================
+ * Types
+ * ============================== */
 
-export type SegmentStartIn = {
-  id: number;            // PK транскрипта = id митинга
-  file_id: number;       // привязанный файл
-  mode: SegmentMode;     // режим нарезки
-  meeting_id?: number;   // совместимость: можно прислать = file_id, бэк игнорирует для поиска
-};
+export type SegmentMode = 'diarize' | 'vad' | 'fixed' | 'full';
+export const ALL_MODES: SegmentMode[] = ['diarize', 'vad', 'fixed', 'full'];
 
-export type SegmentStartOut = {
+export type ModeStateLite = { mode: SegmentMode; status: string; chunks: number };
+
+export interface SegmentationState {
   transcript_id: number;
-  status: string;        // "processing"
+  status: string;
+  chunks: number;
+}
+
+export interface StartSegmentationPayload {
+  id: number;            // transcript_id
+  file_id: number;
   mode: SegmentMode;
-  chunks?: number | null;
-};
+}
 
-export type SegmentStateOut = {
+export interface StartSegmentationOut {
   transcript_id: number;
-  status: string;        // "processing" | "diarization_done" | "error" | ...
-  chunks: number;        // количество интервалов (MfgDiarization)
-};
+  status: string;
+  mode: SegmentMode;
+  chunks: number;
+}
 
-export type TranscriptionStartOut = {
+export interface StartTranscriptionFromSegmentsIn {
   transcript_id: number;
-  status: string;        // "transcription_processing"
-};
+  mode: SegmentMode;
+}
 
-export type SegmentListItem = {
+export interface StartTranscriptionFromSegmentsOut {
+  transcript_id: number;
+  status: string;
+}
+
+export interface V2DiarItem {
+  id: number;
+  start_ts: number | null;
+  end_ts: number | null;
+  speaker: string | null;
+}
+
+export interface V2Speaker {
+  id: number;
+  speaker: string;            // нормализуем до строки
+  display_name: string | null;
+  color: string | null;
+  is_active: boolean;
+}
+
+export interface V2TextItem {
   id: number;
   start_ts: number | null;
   end_ts: number | null;
   text: string;
   speaker: string | null;
   lang: string | null;
-};
+}
 
-export type SegmentList = {
-  items: SegmentListItem[];
-  total: number;
-};
-
-export type V2Result = {
+export interface V2Result {
   transcript_id: number;
   status: string;
+  filename: string | null;
+  file_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  text: string | null;
+  diarization: V2DiarItem[];
+  speakers: V2Speaker[];
+  segments: V2TextItem[];
+}
+
+/* Raw server shapes (allow undefined) */
+
+interface V2TextItemRaw {
+  id?: number;
+  start_ts?: number | null;
+  end_ts?: number | null;
+  text?: string;
+  speaker?: string | null;
+  lang?: string | null;
+}
+
+interface V2SpeakerRaw {
+  id?: number;
+  speaker?: string | null;
+  display_name?: string | null;
+  color?: string | null;
+  is_active?: boolean;
+}
+
+interface V2ResultRaw {
+  transcript_id?: number;
+  status?: string;
   filename?: string | null;
   file_id?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
   text?: string | null;
-  diarization: { id: number; start_ts: number | null; end_ts: number | null; speaker: string | null }[];
-  speakers: { id: number; speaker: string; display_name: string | null; color: string | null; is_active: boolean }[];
-  segments: { id: number; start_ts: number | null; end_ts: number | null; text: string; speaker: string | null; lang: string | null }[];
-};
-
-/* ---------- v2: сегментация ---------- */
-
-export async function startSegmentationV2(body: SegmentStartIn): Promise<SegmentStartOut> {
-  // путь БЕЗ завершающего слэша
-  return api<SegmentStartOut>('/api/v2/segment', { method: 'POST', body });
+  diarization?: V2DiarItem[];
+  speakers?: V2SpeakerRaw[];
+  segments?: V2TextItemRaw[];
 }
+
+/* ==============================
+ * API helpers
+ * ============================== */
+
+async function fetchSegmentationState(
+  transcriptId: number,
+  mode: SegmentMode
+): Promise<SegmentationState> {
+  return api<SegmentationState>(`/api/v2/segment/${transcriptId}?mode=${mode}`);
+}
+
+async function fetchAllModesState(transcriptId: number): Promise<ModeStateLite[]> {
+  const modes = ALL_MODES;
+  const results = await Promise.all(
+    modes.map(async (m) => {
+      try {
+        const s = await fetchSegmentationState(transcriptId, m);
+        return { mode: m, status: s.status, chunks: s.chunks } as ModeStateLite;
+      } catch {
+        return { mode: m, status: 'queued', chunks: 0 } as ModeStateLite;
+      }
+    })
+  );
+  return results;
+}
+
+async function startSegmentationV2(payload: StartSegmentationPayload): Promise<StartSegmentationOut> {
+  return api<StartSegmentationOut>(`/api/v2/segment`, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+async function startTranscriptionFromSegments(
+  payload: StartTranscriptionFromSegmentsIn
+): Promise<StartTranscriptionFromSegmentsOut> {
+  const { transcript_id, mode } = payload;
+  return api<StartTranscriptionFromSegmentsOut>(
+    `/api/v2/segment/transcription/${transcript_id}?mode=${mode}`,
+    { method: 'POST' }
+  );
+}
+
+async function fetchV2Result(transcriptId: number, mode: SegmentMode): Promise<V2Result> {
+  const r = await api<V2ResultRaw>(`/api/v2/segment/${transcriptId}/result?mode=${mode}`);
+
+  const segments: V2TextItem[] = Array.isArray(r.segments)
+    ? r.segments.map((s): V2TextItem => ({
+        id: (s.id ?? 0) as number,
+        start_ts: s.start_ts ?? null,
+        end_ts: s.end_ts ?? null,
+        text: s.text ?? '',
+        speaker: s.speaker ?? null,
+        lang: s.lang ?? null,
+      }))
+    : [];
+
+  const speakers: V2Speaker[] = Array.isArray(r.speakers)
+    ? r.speakers.map((s): V2Speaker => ({
+        id: (s.id ?? 0) as number,
+        speaker: s.speaker ?? '',
+        display_name: s.display_name ?? null,
+        color: s.color ?? null,
+        is_active: s.is_active ?? true,
+      }))
+    : [];
+
+  return {
+    transcript_id: (r.transcript_id ?? transcriptId) as number,
+    status: r.status ?? 'processing',
+    filename: r.filename ?? null,
+    file_id: r.file_id ?? null,
+    created_at: r.created_at ?? null,
+    updated_at: r.updated_at ?? null,
+    text: r.text ?? null,
+    diarization: Array.isArray(r.diarization) ? r.diarization : [],
+    speakers,
+    segments,
+  };
+}
+
+/* ==============================
+ * Hooks (no polling; keep data)
+ * ============================== */
+
+export function useAllModesState(transcriptId?: number) {
+  return useQuery<ModeStateLite[], Error, ModeStateLite[]>({
+    queryKey: ['segmentation-summary', transcriptId ?? 0] as const,
+    queryFn: () => fetchAllModesState(transcriptId as number),
+    enabled: Boolean(transcriptId),
+    refetchInterval: false,
+    placeholderData: (prev) => prev,
+    staleTime: 0,
+  });
+}
+
+export function useSegmentationState(transcriptId: number | undefined, mode: SegmentMode) {
+  return useQuery<SegmentationState, Error, SegmentationState>({
+    queryKey: ['segmentation-state', transcriptId ?? 0, mode] as const,
+    queryFn: () => fetchSegmentationState(transcriptId as number, mode),
+    enabled: Boolean(transcriptId),
+    refetchInterval: false,
+    placeholderData: (prev) => prev,
+    staleTime: 0,
+  });
+}
+
+export function useV2Result(transcriptId: number | undefined, mode: SegmentMode) {
+  return useQuery<V2Result, Error, V2Result>({
+    queryKey: ['v2-result', transcriptId ?? 0, mode] as const,
+    queryFn: () => fetchV2Result(transcriptId as number, mode),
+    enabled: Boolean(transcriptId),
+    refetchInterval: false,
+    placeholderData: (prev) => prev,
+    staleTime: 0,
+  });
+}
+
+/* ==============================
+ * Mutations
+ * ============================== */
 
 export function useStartSegmentationV2() {
-  const qc = useQueryClient();
-  return useMutation<SegmentStartOut, Error, SegmentStartIn>({
-    mutationFn: (payload) => startSegmentationV2(payload),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['meeting', res.transcript_id] });
-      qc.invalidateQueries({ queryKey: ['segmentation', res.transcript_id] });
-      qc.invalidateQueries({ queryKey: ['meetings'] });
-    },
+  return useMutation<StartSegmentationOut, Error, StartSegmentationPayload>({
+    mutationFn: (body) => startSegmentationV2(body),
   });
-}
-
-export async function fetchSegmentationState(transcriptId: number): Promise<SegmentStateOut> {
-  return api<SegmentStateOut>(`/api/v2/segment/${transcriptId}`);
-}
-
-export function useSegmentationState(transcriptId: number | null | undefined) {
-  return useQuery<SegmentStateOut, Error>({
-    queryKey: ['segmentation', transcriptId],
-    queryFn: () => fetchSegmentationState(transcriptId as number),
-    enabled: typeof transcriptId === 'number' && transcriptId > 0,
-    refetchInterval: (q) => {
-      const d = q.state.data as SegmentStateOut | undefined;
-      return d && d.status === 'processing' ? 1500 : false;
-    },
-    staleTime: 1000,
-  });
-}
-
-export async function startTranscriptionFromSegments(transcriptId: number): Promise<TranscriptionStartOut> {
-  return api<TranscriptionStartOut>(`/api/v2/segment/transcription/${transcriptId}`, { method: 'POST' });
 }
 
 export function useStartTranscriptionFromSegments() {
-  const qc = useQueryClient();
-  return useMutation<TranscriptionStartOut, Error, { transcript_id: number }>({
-    mutationFn: ({ transcript_id }) => startTranscriptionFromSegments(transcript_id),
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['meeting', res.transcript_id] });
-      qc.invalidateQueries({ queryKey: ['segmentation', res.transcript_id] });
-      qc.invalidateQueries({ queryKey: ['segments', res.transcript_id] });
-      qc.invalidateQueries({ queryKey: ['meetings'] });
-    },
-  });
-}
-
-/* ---------- (опционально) текстовые сегменты после ASR ---------- */
-
-export async function fetchSegmentsList(transcriptId: number): Promise<SegmentList> {
-  try {
-    return await api<SegmentList>(`/api/v1/transcripts/${transcriptId}/segments`);
-  } catch (e: unknown) {
-    const msg = (e as { message?: string })?.message ?? '';
-    if (/404|not found/i.test(msg)) return { items: [], total: 0 };
-    throw e;
-  }
-}
-
-export function useSegments(transcriptId: number | null | undefined) {
-  return useQuery<SegmentList, Error>({
-    queryKey: ['segments', transcriptId],
-    queryFn: () => fetchSegmentsList(transcriptId as number),
-    enabled: typeof transcriptId === 'number' && transcriptId > 0,
-    staleTime: 2000,
-  });
-}
-
-export async function fetchV2Result(transcriptId: number): Promise<V2Result> {
-  return api<V2Result>(`/api/v2/segment/${transcriptId}/result`);
-}
-
-export function useV2Result(transcriptId: number | null | undefined) {
-  return useQuery<V2Result, Error>({
-    queryKey: ['v2result', transcriptId],
-    queryFn: () => fetchV2Result(transcriptId as number),
-    enabled: typeof transcriptId === 'number' && transcriptId > 0,
-    // авто-опросим, пока процесс идёт
-    refetchInterval: (q) => {
-      const d = q.state.data as V2Result | undefined;
-      return d && (d.status === 'processing' || d.status === 'transcription_processing') ? 1500 : false;
-    },
-    staleTime: 500,
+  return useMutation<StartTranscriptionFromSegmentsOut, Error, StartTranscriptionFromSegmentsIn>({
+    mutationFn: (body) => startTranscriptionFromSegments(body),
   });
 }

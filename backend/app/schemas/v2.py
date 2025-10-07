@@ -5,10 +5,11 @@ from pydantic import BaseModel, Field
 SegmentMode = Literal["full", "vad", "fixed", "diarize"]
 
 class SegmentStartIn(BaseModel):
-    id: int = Field(..., ge=1)             # transcript_id (PK)
+    id: int = Field(..., ge=1)
     file_id: int = Field(..., ge=1)
     mode: SegmentMode = "diarize"
-    meeting_id: Optional[int] = None       # совместимость, не используем для поиска
+    meeting_id: Optional[int] = None
+    overwrite: bool = False
 
 class SegmentStartOut(BaseModel):
     transcript_id: int

@@ -36,10 +36,12 @@ class MfgSegment(Base):
     start_ts      = Column(Float)   
     end_ts        = Column(Float)   
     text          = Column(Text)
-    lang          = Column(String)  # ISO-код языка сегмента, опционально
+    lang          = Column(String)  
+    mode          = Column(String, nullable=False, server_default="diarize", index=True)
     updated_at    = Column(PG_TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
     __table_args__ = (
-        UniqueConstraint("transcript_id", "start_ts", "end_ts", name="uq_mfg_segments_tid_range"),
+        UniqueConstraint("transcript_id", "start_ts", "end_ts", "mode", name="uq_mfg_segment_range_mode"),
+        Index("ix_mfg_segment_tid_mode", "transcript_id", "mode"),
     )
 
 class MfgDiarization(Base):
@@ -50,6 +52,13 @@ class MfgDiarization(Base):
     start_ts      = Column(Float)
     end_ts        = Column(Float)
     file_path     = Column(Text)
+    mode          = Column(String, nullable=False, server_default="diarize")
+    __table_args__ = (
+        # NEW: уникальность «кусочек» в рамках конкретного режима
+        UniqueConstraint("transcript_id", "mode", "start_ts", "end_ts", name="uq_mfg_diarization_chunk"),
+        # NEW (рекомендация): быстрый поиск статуса/счётчиков по режиму
+        Index("ix_mfg_diarization_tid_mode_start", "transcript_id", "mode", "start_ts"),
+    )
 
 class MfgEmbedding(Base):
     __tablename__ = "mfg_embedding"

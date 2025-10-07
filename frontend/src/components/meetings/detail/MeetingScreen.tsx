@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useMeetingBundle } from '@/hooks/useMeetingBundle';
 import Header from './Header';
-import SegmentationPanel from './SegmentationPanel';
+import ModesPanel from './ModesPanel';
 import ResultTabs from './ResultTabs';
 
 type Props = { meetingId: number };
@@ -9,7 +9,7 @@ type Props = { meetingId: number };
 export default function MeetingScreen({ meetingId }: Props) {
   const b = useMeetingBundle(meetingId);
 
-  if (b.meeting.isLoading) return <p>Загрузка…</p>;
+  if (b.meeting.isLoading || b.summary.isLoading) return <p>Загрузка…</p>;
   if (b.meeting.isError) return <div className="text-red-600">Ошибка: {b.meeting.error?.message}</div>;
   if (!b.meeting.data) return <p>Не найдено</p>;
 
@@ -22,26 +22,32 @@ export default function MeetingScreen({ meetingId }: Props) {
           meetingId={meta.meeting_id}
           filename={meta.filename ?? '—'}
           createdAt={meta.created_at ?? null}
-          status={b.status}
+          status={b.globalStatus}
           progress={meta.job?.progress ?? null}
         />
-        <SegmentationPanel
-          segStatus={b.segState.data?.status ?? '—'}
-          chunks={b.chunks}
-          canCut={b.canCut}
-          cuttingNow={b.cuttingNow}
+        <ModesPanel
+          summary={b.summary.data ?? []}
+          active={b.mode}
+          onSelect={b.setMode}
           onCut={b.startCut}
-          canTranscribe={Boolean(b.canTranscribe)}
-          transcribingNow={b.isTranscribePending}
           onTranscribe={b.startTranscribe}
+          canCut={b.canCut}
+          canTranscribe={b.canTranscribe}
+          cuttingNow={b.cuttingNow}
+          transcribingNow={b.transcribingNow}
         />
       </div>
 
       <div className="lg:col-span-2 border rounded-lg p-4">
-        <h2 className="font-medium mb-2">Результат</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-medium">Результат</h2>
+          <span className="text-xs px-2 py-1 rounded border">
+            Режим: <b>{b.mode}</b>
+          </span>
+        </div>
         <ResultTabs
           text={b.v2.data?.text ?? meta.processed_text ?? meta.raw_text ?? ''}
-          segments={b.v2.data?.segments ?? b.segments.data?.items ?? []}
+          segments={b.v2.data?.segments ?? []}
           speakers={b.v2.data?.speakers ?? meta.speakers ?? []}
         />
       </div>
