@@ -1,26 +1,32 @@
 import * as React from 'react';
-import { formatDate } from '@/lib/files';
 
 type Props = {
-  meetingId: number;
-  filename: string;
-  createdAt: string | null;
-  status: string;
-  progress: number | null;
+  title?: string;
+  meetingId?: number;
+  filename?: string;
+  createdAt?: string | null;
+  status?: string;
+  progress?: number | null;
 };
 
-export default function Header({ meetingId, filename, createdAt, status, progress }: Props) {
+export default function Header({ title, meetingId, filename, createdAt, status, progress }: Props) {
   return (
-    <div className="flex items-center justify-between">
-      <div className="space-y-0.5">
-        <h1 className="text-xl font-semibold">Митинг #{meetingId}</h1>
-        <p className="text-sm text-gray-500">
-          Файл: {filename} · создано {createdAt ? formatDate(createdAt) : '—'}
-        </p>
-      </div>
-      <div className="text-sm">
-        <span className="px-2 py-1 rounded border">{status}</span>
-        {typeof progress === 'number' && <span className="ml-2 text-gray-500">{progress}%</span>}
+    <div className="border rounded-lg p-4 bg-white">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">
+            {title ?? (meetingId ? `Митинг #${meetingId}` : 'Митинг')}
+          </h1>
+          <div className="text-xs text-gray-500">
+            {filename ?? '—'}{createdAt ? ` • ${new Date(createdAt).toLocaleString()}` : ''}
+          </div>
+        </div>
+        <div className="text-right">
+          {status && <div className="text-xs px-2 py-1 border rounded inline-block">{status}</div>}
+          {typeof progress === 'number' && (
+            <div className="text-[10px] text-gray-500 mt-1">progress: {progress}%</div>
+          )}
+        </div>
       </div>
     </div>
   );

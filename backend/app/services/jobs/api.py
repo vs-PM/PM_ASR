@@ -24,11 +24,11 @@ async def process_segmentation(transcript_id: int, audio_path: str, mode: str = 
 async def process_pipeline(transcript_id: int) -> None:
     await _run_pipe(transcript_id)
 
-async def process_embeddings(transcript_id: int) -> None:
-    await _run_emb(transcript_id)
+async def process_embeddings(transcript_id: int, mode: str | None = None) -> int:
+    return await _run_emb(transcript_id, mode=mode)
 
-async def process_summary(transcript_id: int, lang: str = "ru", format_: str = "md") -> None:
-    await _run_sum(transcript_id, lang, format_)
+async def process_summary(transcript_id: int, lang: str = "ru", format_: str = "md", mode: str = "diarize") -> None:
+    await _run_sum(transcript_id, lang, format_, mode)
 
 async def process_transcription(transcript_id: int, audio_path: str) -> None:
     await _run_trans(transcript_id, audio_path)

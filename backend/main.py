@@ -9,6 +9,7 @@ from app.api.v1 import transcripts as transcripts_api
 from app.api.v1 import meetings as meetings_router
 from app.api.v2 import segment as seg_v2
 from app.api.v2 import transcripts as transcripts_v2
+from app.api.v2 import embedsum as embedsum_v2
 from app.db.session import async_engine
 from app.core.logger import get_logger
 from app.core.errors import install_exception_handlers
@@ -43,7 +44,7 @@ app.include_router(transcription.router, prefix="/transcription")
 app.include_router(diarization.router, prefix="/diarization")
 app.include_router(pipeline.router, prefix="/pipeline")
 app.include_router(embeddings.router, prefix="/embeddings")
-app.include_router(summary.router, prefix="/summary")
+app.include_router(summary.router, prefix="/api/v1/summary", tags=["summary"])
 app.include_router(protokol.router, prefix="/protokol")
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
@@ -54,6 +55,7 @@ app.include_router(files_api.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(meetings_router.router, prefix="/api/v1/meetings", tags=["meetings"])
 app.include_router(seg_v2.router, prefix="/api/v2/segment", tags=["v2-segmentation"])
 app.include_router(transcripts_v2.router, prefix="/api/v2/transcripts", tags=["v2-transcripts"])
+app.include_router(embedsum_v2.router, prefix="/api/v2", tags=["v2"])
 
 
 # -------------------------------

@@ -13,6 +13,8 @@ type Props = {
   canTranscribe: boolean;
   cuttingNow: boolean;
   transcribingNow: boolean;
+  onCreateProtocol: () => void;
+  creatingNow: boolean;
 };
 
 const TITLES: Record<SegmentMode, string> = {
@@ -32,12 +34,14 @@ export default function ModesPanel({
   canTranscribe,
   cuttingNow,
   transcribingNow,
+  creatingNow,
+  onCreateProtocol
 }: Props) {
   const modes: SegmentMode[] = ['full', 'vad', 'fixed', 'diarize'];
 
   return (
     <div className="border rounded-lg p-4 space-y-4">
-      <h2 className="font-medium">Шаг 1: Нарезка (выбери режим)</h2>
+      <h2 className="font-medium"> (выбери режим)</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {modes.map(m => {
@@ -73,6 +77,13 @@ export default function ModesPanel({
           onClick={onTranscribe}
         >
           {transcribingNow ? 'Запускаю…' : 'Транскрибировать по выбранному режиму'}
+        </button>
+        <button
+          className="flex-1 px-3 py-2 border rounded-md hover:bg-gray-50 disabled:opacity-60"
+          onClick={onCreateProtocol}
+          disabled={!onCreateProtocol || !!creatingNow}
+        >
+          {creatingNow ? 'Создаю протокол…' : 'Создать протокол'}
         </button>
       </div>
 

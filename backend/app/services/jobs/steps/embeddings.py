@@ -1,24 +1,49 @@
+from __future__ import annotations
+
 from sqlalchemy import select
-from app.core.logger import get_logger
+
 from app.db.session import async_session
 from app.db.models import MfgSegment, MfgEmbedding
+from app.core.logger import get_logger
 from app.services.pipeline.embeddings import embed_text
 
 log = get_logger(__name__)
 
-async def run(transcript_id: int) -> int:
+
+async def run(transcript_id: int, mode: str | None = None) -> int:
     async with async_session() as s:
-        segs = (await s.execute(
-            select(MfgSegment).where(MfgSegment.transcript_id == transcript_id)
-        )).scalars().all()
+        # Берём сегменты нужного transcript_id (и mode, если указан),
+        # у которых ещё нет строки в mfg_embedding.
+        q = (
+            select(MfgSegment)
+            .outerjoin(MfgEmbedding, MfgEmbedding.segment_id == MfgSegment.id)
+            .where(MfgSegment.transcript_id == transcript_id)
+            .where(MfgEmbedding.segment_id.is_(None))
+        )
+        if mode:
+            q = q.where(MfgSegment.mode == mode)
+
+        segs = (await s.execute(q)).scalars().all()
 
         created = 0
         for seg in segs:
-            emb = await embed_text(seg.text)
-            if emb:
-                s.add(MfgEmbedding(segment_id=seg.id, embedding=emb))
-                created += 1
+            text = (seg.text or "").strip()
+            if not text:
+                continue
+
+            emb = await embed_text(text)
+            if emb is None:
+                continue
+
+            s.add(MfgEmbedding(segment_id=seg.id, embedding=emb))
+            created += 1
+
         await s.commit()
 
-    log.info("Embeddings: created %d vectors for tid=%s", created, transcript_id)
+    log.info(
+        "Embeddings(%s): created %d vectors for tid=%s",
+        mode or "ALL",
+        created,
+        transcript_id,
+    )
     return created

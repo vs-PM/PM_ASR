@@ -12,7 +12,6 @@ from app.db.models import MfgSegment, MfgSummarySection
 from app.core.logger import get_logger
 from app.core.config import settings
 
-# ВАЖНО: правильный модуль с промптами
 from .prompts import (
     system_prompt_for,
     render_batch_user_prompt,
@@ -30,41 +29,35 @@ from app.services.pipeline.embeddings import embed_text
 log = get_logger(__name__)
 
 
-async def _upsert_summary(session: AsyncSession, transcript_id: int, draft: str, final_text: str) -> None:
+async def _upsert_summary(session: AsyncSession, transcript_id: int, mode: str, draft: str, final_text: str) -> None:
     """
     Обновить/создать ровно одну строку в mfg_summary_section для данного transcript_id.
     title ← draft, text ← final.
     Храним в idx=1 (чтобы не получать дублей).
     """
-    row = (
-        await session.execute(
-            select(MfgSummarySection)
-            .where(
-                MfgSummarySection.transcript_id == transcript_id,
-                MfgSummarySection.idx == 1,
-            )
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    row = (await session.execute(
+        select(MfgSummarySection)
+        .where(MfgSummarySection.transcript_id == transcript_id)
+        .where(MfgSummarySection.idx == 1)
+        .where(MfgSummarySection.mode == mode)
+        .limit(1)
+    )).scalar_one_or_none()
 
     if row:
         row.title = draft or ""
         row.text = final_text or ""
-        row.start_ts = None
-        row.end_ts = None
     else:
-        row = MfgSummarySection(
-            transcript_id=transcript_id,
-            idx=1,                    # <- ОБЯЗАТЕЛЬНО
-            start_ts=None,
-            end_ts=None,
-            title=(draft or ""),
-            text=(final_text or ""),
-        )
-        session.add(row)
+        session.add(MfgSummarySection(
+            transcript_id=transcript_id, idx=1, title=draft or "", text=final_text or "", mode=mode
+        ))
 
 
-async def generate_protocol(transcript_id: int, lang: str = "ru", output_format: str = "text") -> None:
+async def generate_protocol(
+    transcript_id: int,
+    lang: str = "ru",
+    output_format: str = "md",
+    mode: str = "diarize",
+) -> None:
     """
     Итеративная суммаризация (батчи + RAG) → финальный цельный текст протокола.
     Сохраняем: черновик в mfg_summary_section.title, финальный текст в mfg_summary_section.text (idx=1).
@@ -83,18 +76,17 @@ async def generate_protocol(transcript_id: int, lang: str = "ru", output_format:
     temperature = getattr(settings, "summarize_temperature", 0.2)
 
     async with async_session() as session:
-        segs: List[MfgSegment] = (
-            await session.execute(
-                select(MfgSegment)
-                .where(MfgSegment.transcript_id == transcript_id)
-                .order_by(MfgSegment.start_ts)
-            )
-        ).scalars().all()
+        segs = (await session.execute(
+            select(MfgSegment)
+            .where(MfgSegment.transcript_id == transcript_id)
+            .where(MfgSegment.mode == mode)
+            .order_by(MfgSegment.start_ts.asc())
+        )).scalars().all()
 
         if not segs:
-            log.error("No segments to summarize for tid=%s", transcript_id)
+            log.error("No segments to summarize for tid=%s", transcript_id, mode)
             # Сохраняем пустую запись, чтобы статус не висел в processing
-            await _upsert_summary(session, transcript_id, draft="", final_text="")
+            await _upsert_summary(session, transcript_id, mode=mode, draft="", final_text="")
             await session.commit()
             return
 
@@ -195,7 +187,7 @@ async def generate_protocol(transcript_id: int, lang: str = "ru", output_format:
             final_text = draft or ""
 
         # ——— сохранить: title ← draft, text ← final_text (idx=1)
-        await _upsert_summary(session, transcript_id, draft=draft or "", final_text=final_text or "")
+        await _upsert_summary(session, transcript_id, mode=mode, draft=draft or "", final_text=final_text or "")
         await session.commit()
 
         log.info("Summary saved: tid=%s | total=%.2fs", transcript_id, time.monotonic() - t_start)

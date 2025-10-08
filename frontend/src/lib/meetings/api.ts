@@ -80,11 +80,11 @@ async function resolveTitleForTranscript(meetingId: number): Promise<string> {
   return `Meeting #${meetingId}`;
 }
 
-/** Запуск транскрипции (v1). Бэк ждёт: { title, meeting_id, file_id } */
 export async function runTranscription(
   meetingId: number,
-  _seg?: Segmentation, // пока не используется схемой create_transcript
+  _seg?: Segmentation,
 ): Promise<StartTranscriptionNormalized> {
+  void _seg;
   const title = await resolveTitleForTranscript(meetingId);
   // На текущем бэке meeting_id == file_id == id (контракт зафиксирован)
   const body = { title, meeting_id: meetingId, file_id: meetingId };
@@ -96,7 +96,6 @@ export async function runTranscription(
   return normalizeStartResponse(res);
 }
 
-/** Нормализация ответа { transcript_id, status } / { id, status } */
 function normalizeStartResponse(res: unknown): StartTranscriptionNormalized {
   if (typeof res === 'object' && res !== null) {
     const r = res as Record<string, unknown>;

@@ -54,9 +54,7 @@ class MfgDiarization(Base):
     file_path     = Column(Text)
     mode          = Column(String, nullable=False, server_default="diarize")
     __table_args__ = (
-        # NEW: уникальность «кусочек» в рамках конкретного режима
         UniqueConstraint("transcript_id", "mode", "start_ts", "end_ts", name="uq_mfg_diarization_chunk"),
-        # NEW (рекомендация): быстрый поиск статуса/счётчиков по режиму
         Index("ix_mfg_diarization_tid_mode_start", "transcript_id", "mode", "start_ts"),
     )
 
@@ -70,11 +68,16 @@ class MfgSummarySection(Base):
     __tablename__ = "mfg_summary_section"
     id            = Column(BigInteger, primary_key=True, autoincrement=True)
     transcript_id = Column(BigInteger, ForeignKey("mfg_transcript.id", ondelete="CASCADE"), nullable=False)
-    idx           = Column(Integer, nullable=False)  # порядок разделов в протоколе
-    start_ts      = Column(Float)    # опционально: начальная метка времени раздела
-    end_ts        = Column(Float)    # опционально: конечная метка времени раздела
-    title         = Column(Text)     # заголовок раздела
-    text          = Column(Text)     # содержимое раздела
+    idx           = Column(Integer, nullable=False)  
+    start_ts      = Column(Float)    
+    end_ts        = Column(Float)    
+    title         = Column(Text)     
+    text          = Column(Text)
+    mode          = Column(String, nullable=False, server_default="diarize", index=True)
+    __table_args__ = (
+        UniqueConstraint("transcript_id", "idx", "mode", name="uq_mfg_summary_section_tid_idx_mode"),
+        Index("ix_mfg_summary_tid_mode", "transcript_id", "mode"),
+    )
 
 class MfgActionItem(Base):
     __tablename__ = "mfg_action_item"
